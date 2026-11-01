@@ -122,7 +122,7 @@
     <string name="usb_auto_confirm_subtitle">有線連線 iPhone 時自動確認系統 USB 權限彈出視窗（需要輔助使用服務）</string>
     <string name="usb_auto_confirm_desc">在出現 CarPlay USB 權限彈出視窗時自動勾選預設並點選「確定」</string>
     <string name="automatic_map_setup_adb">自動地圖設定 · ADB</string>
-    <string name="availability_depends_on_your_head_unit_s_startup_settings">是否可用取決於車機的啟動設定。</string>
+    <string name="availability_depends_on_your_head_unit_s_startup_settings">若重新啟動後沒有開啟 DiPlay，請在車機設定中允許 DiPlay 在背景自動啟動。</string>
     <string name="back">返回</string>
     <string name="back_to_diplay">返回 DiPlay</string>
     <string name="band">頻段</string>
@@ -576,7 +576,7 @@
     <string name="settings_car_hotspot_config_failed">未能核實原車熱點的寫入結果，請重新讀取後再連線。DiPlay 保留原來的連線資訊。</string>
     <string name="settings_car_hotspot_config_wpa3">WPA3 熱點保持不變。請將熱點詳細資訊儲存為 WPA2 後再寫入車機。</string>
     <string name="settings_car_hotspot_config_open">DiPlay 的開放熱點不會改寫車機的熱點密碼。</string>
-    <string name="hotspot_control_missing">缺少熱點控制權限。請透過 ADB 授權，或在車機設定中手動開啟熱點。</string>
+    <string name="hotspot_control_missing">請在系統設定中允許 DiPlay「修改系統設定」，或在車機設定中手動開啟熱點。</string>
     <string name="hotspot_permission_granted">授權成功。</string>
     <string name="hotspot_permission_failed">未獲得所請求的權限。請檢查車機設定後再試一次。</string>
     <string name="hotspot_control_on">車機熱點已開啟。</string>
@@ -823,7 +823,7 @@
     <string name="settings_navigation_attenuation_value">%1$d dB</string>
     <string name="settings_navigation_attenuation_description">只降低 CarPlay 導航提示音量，不影響音樂與通話。調整立即生效，仍可使用車機本身的導航音量。</string>
     <string name="settings_car_hotspot_control">車輛熱點</string>
-    <string name="settings_auto_car_hotspot_system_description">開啟 DiPlay 時及無線連線前開啟已儲存的車輛熱點。熱點關閉且車機支援 5 GHz 時，會先將儲存的頻段切到 5 GHz；已開啟的熱點維持原頻段，等下次關閉再開啟後生效。DiPlay 需要 Android 的「修改系統設定」權限；不需要 ADB。若要在完全重新啟動後也有熱點，請同時開啟「車輛啟動後開啟 DiPlay」。熱點不會自動關閉。</string>
+    <string name="settings_auto_car_hotspot_system_description">開啟 DiPlay 或連線無線 CarPlay 時，自動開啟已儲存的車機熱點。支援系統控制的車機只需允許「修改系統設定」。如需隨車啟動，請同時開啟「車輛啟動後開啟 DiPlay」。啟動前會在支援時優先選用 5 GHz；已開啟的熱點保留原頻段，離開時也會保持開啟。</string>
     <string name="settings_write_settings_granted">「修改系統設定」權限：已允許</string>
     <string name="settings_write_settings_missing">尚未允許「修改系統設定」權限。請允許，讓 DiPlay 能開啟熱點。</string>
     <string name="settings_write_settings_allow">允許權限</string>

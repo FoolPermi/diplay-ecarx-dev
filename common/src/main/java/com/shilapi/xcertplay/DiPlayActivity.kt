@@ -266,11 +266,6 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         }
     }
     @Volatile private var startupHotspotCancelled = false
-    private var adbSwitchChangePending = false
-    private var pausedForAdbSwitchChange = false
-    private var updatingAdbSwitches = false
-    private val adbSwitches = mutableMapOf<Int, Pair<Switch, () -> Boolean>>()
-    private var adbStatus: TextView? = null
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
         connect(notificationTransport)
     }
@@ -680,8 +675,6 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         reconnectBar = null
         readinessCard = null
         exportButton = null
-        adbSwitches.clear()
-        adbStatus = null
         val compact = isCompactLayout && when (page) {
             "settings" -> !SettingsLayoutPreferences.isActive(this)
             else -> true
@@ -1804,12 +1797,9 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             ), connectionModes.indexOf(DiPlayPreferences.defaultConnectionMode(this)), reconnects = false) {
                 DiPlayPreferences.saveDefaultConnectionMode(this, connectionModes[it])
             }
-            adbToggle(card, R.string.open_after_the_car_starts,
-                R.string.availability_depends_on_your_head_unit_s_startup_settings,
-                read = { AirPlayPersistence.loadAutoStartOnBoot(this) },
-                needsAdb = { CarHotspotSettings.enabled(this) &&
-                    AirPlayPersistence.loadWirelessHotspotMode(this) == WirelessHotspotMode.MANUAL },
-                permissions = { listOf(CarHotspotSetup.Permission.BOOT_LAUNCH) }) {
+            toggle(card, getString(R.string.open_after_the_car_starts),
+                getString(R.string.availability_depends_on_your_head_unit_s_startup_settings),
+                AirPlayPersistence.loadAutoStartOnBoot(this)) {
                 AirPlayPersistence.saveAutoStartOnBoot(this, it)
             }
             val autoConfirmActive = UsbPermissionSetup.Permission.ACCESSIBILITY.granted(this)
@@ -2552,61 +2542,6 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         dialog.window?.setLayout((metrics.widthPixels * 0.9f).toInt(), (metrics.heightPixels * 0.9f).toInt())
     }
 
-    private fun adbToggle(parent: LinearLayout, title: Int, description: Int, read: () -> Boolean,
-        needsAdb: () -> Boolean = { true },
-        permissions: () -> List<CarHotspotSetup.Permission> = { emptyList() }, save: (Boolean) -> Unit) {
-        val control = toggle(parent, getString(title), getString(description), read(),
-            enabled = !adbSwitchChangePending && true) { enabled ->
-            if (updatingAdbSwitches || adbSwitchChangePending) return@toggle
-            if (enabled && needsAdb()) requestAdbSwitchChange(permissions()) { save(true) }
-            else save(enabled)
-        }
-        adbSwitches[title] = control to read
-    }
-
-    private fun requestAdbSwitchChange(permissions: List<CarHotspotSetup.Permission>, save: () -> Unit) {
-        if (adbSwitchChangePending) {
-            updateAdbSwitches()
-            return
-        }
-        val app = applicationContext
-        adbSwitchChangePending = true
-        updateAdbSwitches()
-        adbStatus?.setText(R.string.adb_checking_may_ask)
-        Thread({
-            var access = LocalAdb.Access.UNREACHABLE
-            val ready = runCatching {
-                access = CarHotspotSetup.grant(app, permissions)
-                access == LocalAdb.Access.READY && permissions.all { it.granted(app) }
-            }.getOrDefault(false)
-            runOnUiThread {
-                adbSwitchChangePending = false
-                if (isFinishing || isDestroyed) return@runOnUiThread
-                val message = if (ready) {
-                    if (permissions.isEmpty()) R.string.adb_access_ready else R.string.hotspot_permission_granted
-                } else when (access) {
-                    LocalAdb.Access.NOT_APPROVED -> R.string.adb_not_approved
-                    LocalAdb.Access.UNREACHABLE -> adbOffText()
-                    LocalAdb.Access.UNSUPPORTED -> R.string.adb_pairing_only
-                    else -> R.string.hotspot_permission_failed
-                }
-                adbStatus?.setText(if (ready) R.string.adb_access_ready else message)
-                if (ready) save()
-                updateAdbSwitches()
-                toast(getString(message))
-            }
-        }, "diplay-adb-switch").start()
-    }
-
-    private fun updateAdbSwitches() {
-        updatingAdbSwitches = true
-        for ((control, read) in adbSwitches.values) {
-            control.isChecked = read()
-            control.isEnabled = !adbSwitchChangePending && true
-        }
-        updatingAdbSwitches = false
-    }
-
     private fun startCarHotspotOnLaunch(connectSource: ConnectionTraceSource? = null) {
         if (!startupHotspotEligible() && !(connectSource != null && autoHotspotWanted())) return
         if (hotspotStartupRunning) {
@@ -3070,8 +3005,10 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 getString(R.string.settings_auto_car_hotspot_system_description), CarHotspotSettings.enabled(this)) { enabled ->
                 CarHotspotSettings.setEnabled(this, enabled)
                 if (!enabled) startupHotspotCancelled = true
-                else if (!CarHotspotTethering.permitted(this)) openWriteSettingsAccess()
-                else Handler(Looper.getMainLooper()).post { startCarHotspotOnLaunch() }
+                else if (!CarHotspotTethering.permitted(this)) {
+                    hotspotStartupResult = CarHotspotTethering.Result.PERMISSION_REQUIRED
+                    openWriteSettingsAccess()
+                } else Handler(Looper.getMainLooper()).post { startCarHotspotOnLaunch() }
             }
             val phaseText = if (hotspotStartupRunning) when (hotspotStartupPhase) {
                 CarHotspotSetup.Phase.CHECKING -> R.string.settings_hotspot_checking

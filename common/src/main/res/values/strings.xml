@@ -129,7 +129,7 @@
     <string name="usb_auto_confirm_subtitle">Automatically accept the Android USB permission prompt when an iPhone is connected via cable (requires Accessibility Service)</string>
     <string name="usb_auto_confirm_desc">Automatically checks Always allow and confirms the Android USB accessory prompt for CarPlay</string>
     <string name="automatic_map_setup_adb">Automatic map setup · ADB</string>
-    <string name="availability_depends_on_your_head_unit_s_startup_settings">Availability depends on your head unit’s startup settings.</string>
+    <string name="availability_depends_on_your_head_unit_s_startup_settings">If DiPlay does not open after a restart, allow it to start in the background in the car settings.</string>
     <string name="back">Back</string>
     <string name="back_to_diplay">Back to DiPlay</string>
     <string name="band">Band</string>
@@ -630,7 +630,7 @@
     <string name="settings_car_hotspot_config_failed">The car hotspot write could not be verified. Read it again before connecting. DiPlay has kept its previous connection details.</string>
     <string name="settings_car_hotspot_config_wpa3">A WPA3 hotspot is kept unchanged. Save the hotspot details with WPA2 to write them to the car.</string>
     <string name="settings_car_hotspot_config_open">An open hotspot in DiPlay does not overwrite the car\'s password.</string>
-    <string name="hotspot_control_missing">Hotspot control permission is missing. Set it up through ADB or open the hotspot in car settings.</string>
+    <string name="hotspot_control_missing">Allow “Modify system settings” for DiPlay, or turn on the hotspot in the car settings.</string>
     <string name="hotspot_permission_granted">Permission granted.</string>
     <string name="hotspot_permission_failed">The requested permission was not granted. Check the car settings and try again.</string>
     <string name="hotspot_control_on">The car hotspot is on.</string>
@@ -865,7 +865,7 @@
     <string name="settings_navigation_attenuation_value">%1$d dB</string>
     <string name="settings_navigation_attenuation_description">Reduce CarPlay navigation guidance without changing music or call volume. Applies immediately; your head unit’s navigation volume still works.</string>
     <string name="settings_car_hotspot_control">Car hotspot</string>
-    <string name="settings_auto_car_hotspot_system_description">Turns on the saved car hotspot when DiPlay opens and before a wireless connection. If the hotspot is off and the car supports 5 GHz, it switches the saved band to 5 GHz first; an already-running hotspot keeps its band until it is turned off and on again. DiPlay needs Android\'s “Modify system settings” access; ADB is not required. To have the hotspot after a full restart, also turn on opening DiPlay after the car starts. The hotspot is not turned off automatically.</string>
+    <string name="settings_auto_car_hotspot_system_description">Turns on the saved hotspot when DiPlay opens or connects wirelessly. On supported head units, allow “Modify system settings” to start it without ADB. To start at boot, also enable “Open after the car starts”. DiPlay prefers 5 GHz when starting a hotspot, keeps the band of a running hotspot, and leaves it on when you exit.</string>
     <string name="settings_write_settings_granted">“Modify system settings” access: allowed</string>
     <string name="settings_write_settings_missing">“Modify system settings” access is not allowed yet. Allow it so DiPlay can turn on the hotspot.</string>
     <string name="settings_write_settings_allow">Allow access</string>

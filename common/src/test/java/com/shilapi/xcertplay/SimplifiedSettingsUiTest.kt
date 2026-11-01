@@ -105,6 +105,18 @@ class SimplifiedSettingsUiTest {
         assertTrue(hasTitle(settings(SettingsCategory.NAVIGATION), R.string.report_location_to_iphone))
     }
 
+    @Test @Config(sdk = [28]) fun carHotspotBootSwitchSavesWithoutAdb() {
+        AirPlayPersistence.saveWirelessHotspotMode(activity, com.shilapi.xcertplay.orchestration.WirelessHotspotMode.MANUAL)
+        com.shilapi.xcertplay.network.CarHotspotSettings.setEnabled(activity, true)
+        AirPlayPersistence.saveAutoStartOnBoot(activity, false)
+        val switch = views(settings(SettingsCategory.CONNECTION)).filterIsInstance<android.widget.Switch>()
+            .single { it.contentDescription == activity.getString(R.string.open_after_the_car_starts) }
+        switch.performClick()
+        assertTrue(AirPlayPersistence.loadAutoStartOnBoot(activity))
+        switch.performClick()
+        assertFalse(AirPlayPersistence.loadAutoStartOnBoot(activity))
+    }
+
     @Test fun mediaModeLivesInAudioOnly() {
         val root = settings(SettingsCategory.AUDIO)
         assertTrue(hasTitle(root, R.string.settings_media_output_mode))
@@ -136,7 +148,9 @@ class SimplifiedSettingsUiTest {
         })
     }
 
-    @Test @Config(sdk = [28]) fun carHotspotKeepsReadAndStartTogetherAndModificationUnderMore() {
+    @Test @Config(sdk = [28], shadows = [CarHotspotAdbGrantTest.WritePermission::class])
+    fun carHotspotKeepsReadAndStartTogetherAndModificationUnderMore() {
+        CarHotspotAdbGrantTest.WritePermission.allowed = false
         AirPlayPersistence.saveWirelessHotspotMode(activity, com.shilapi.xcertplay.orchestration.WirelessHotspotMode.MANUAL)
         AirPlayPersistence.saveManualHotspotSsid(activity, "Lynk 01")
         AirPlayPersistence.saveManualHotspotPassphrase(activity, "private-password")
@@ -162,6 +176,14 @@ class SimplifiedSettingsUiTest {
             it.text.startsWith(activity.getString(R.string.settings_hotspot_more) + " · ")
         }.performClick()
         assertTrue(visible(modify))
+
+        val autoStart = views(root).filterIsInstance<android.widget.Switch>()
+            .single { it.contentDescription == activity.getString(R.string.auto_car_hotspot_title) }
+        autoStart.isChecked = false
+        autoStart.performClick()
+        assertTrue(com.shilapi.xcertplay.network.CarHotspotSettings.enabled(activity))
+        assertEquals(com.shilapi.xcertplay.network.CarHotspotTethering.Result.PERMISSION_REQUIRED,
+            ReflectionHelpers.getField<com.shilapi.xcertplay.network.CarHotspotTethering.Result>(activity, "hotspotStartupResult"))
     }
 
     private fun settings(category: SettingsCategory): LinearLayout {

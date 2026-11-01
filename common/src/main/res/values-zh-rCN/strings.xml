@@ -122,7 +122,7 @@
     <string name="usb_auto_confirm_subtitle">有线连接 iPhone 时自动确认系统 USB 权限弹窗（需要无障碍服务）</string>
     <string name="usb_auto_confirm_desc">在出现 CarPlay USB 权限弹窗时自动勾选默认并点击确定</string>
     <string name="automatic_map_setup_adb">自动地图设置 · ADB</string>
-    <string name="availability_depends_on_your_head_unit_s_startup_settings">是否可用取决于车机的启动设置。</string>
+    <string name="availability_depends_on_your_head_unit_s_startup_settings">若重启后没有打开 DiPlay，请在车机设置中允许 DiPlay 后台自启动。</string>
     <string name="back">返回</string>
     <string name="back_to_diplay">返回 DiPlay</string>
     <string name="band">频段</string>
@@ -592,7 +592,7 @@
     <string name="settings_car_hotspot_config_failed">未能核实原车热点的写入结果，请重新读取后再连接。DiPlay 保留原来的连接信息。</string>
     <string name="settings_car_hotspot_config_wpa3">WPA3 热点保持不变。请将热点详情保存为 WPA2 后再写入车机。</string>
     <string name="settings_car_hotspot_config_open">DiPlay 的开放热点不会改写车机的热点密码。</string>
-    <string name="hotspot_control_missing">缺少热点控制权限。请通过 ADB 授权，或在车机设置中手动开启热点。</string>
+    <string name="hotspot_control_missing">请在系统设置中允许 DiPlay “修改系统设置”，或在车机设置中手动打开热点。</string>
     <string name="hotspot_permission_granted">授权成功。</string>
     <string name="hotspot_permission_failed">未获得所请求的权限。请检查车机设置后重试。</string>
     <string name="hotspot_control_on">车机热点已开启。</string>
@@ -823,7 +823,7 @@
     <string name="settings_navigation_attenuation_value">%1$d dB</string>
     <string name="settings_navigation_attenuation_description">仅降低 CarPlay 导航播报音量，不影响音乐和通话。调整立即生效，车机自身的导航音量仍可使用。</string>
     <string name="settings_car_hotspot_control">车辆热点</string>
-    <string name="settings_auto_car_hotspot_system_description">打开 DiPlay 时及无线连接前开启已保存的车辆热点。热点关闭且车机支持 5 GHz 时，会先把保存的频段切到 5 GHz；已开着的热点保持原频段，等下次关闭再开启后生效。DiPlay 需要 Android 的“修改系统设置”权限；无需 ADB。若要在完全重启后也有热点，请同时开启“车辆启动后打开 DiPlay”。热点不会自动关闭。</string>
+    <string name="settings_auto_car_hotspot_system_description">打开 DiPlay 或连接无线 CarPlay 时，自动开启已保存的车机热点。支持系统控制的车机只需允许“修改系统设置”。如需随车启动，请同时打开“车辆启动后打开 DiPlay”。启动前会在支持时优先选用 5 GHz；已开启的热点保持原频段，退出时也会保持开启。</string>
     <string name="settings_write_settings_granted">“修改系统设置”权限：已允许</string>
     <string name="settings_write_settings_missing">尚未允许“修改系统设置”权限。请允许，以便 DiPlay 开启热点。</string>
     <string name="settings_write_settings_allow">允许权限</string>
