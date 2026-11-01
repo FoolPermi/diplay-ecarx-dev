@@ -201,12 +201,18 @@ DiPlay 启动时探测两类信息，然后**决定显示哪些卡片**：
 
 **在哪开**：**设置 → 音频 → 车机媒体集成**
 
+![音频页：车机媒体集成](screenshots/settings-media-integration.png)
+
+点进去只有两个选项：
+
+![车机媒体集成的两个选项](screenshots/settings-media-integration-options.png)
+
 界面上只有两个选项，名字不是「ECARX / Android」：
 
 | 选项 | 内部值 | 谁向亿咖通提供媒体源 | 适合什么时候 |
 | --- | --- | --- | --- |
 | **DiPlay 直接接管**（默认） | `ECARX` | DiPlay 的 MediaCenter 直接注册、发布、清理 | 车机被识别为亿咖通时的常态 |
-| **HY 代理**（即通常说的「HY 兼容模式」） | `ANDROID` | HY 读取标准会话后代为发布 | 车机没被识别、或 ECARX 直接通道异常 |
+| **HY 代理**（即通常说的「HY 兼容模式」） | `ANDROID` | HYWebview 读取标准会话后代为发布 | 车机没被识别、或 ECARX 直接通道异常 |
 
 **两种模式相同的地方**：都发布标准 Android MediaSession，嘟嘟这类桌面照样能读歌名、歌手、专辑、时长、封面和播放状态，也能用标准播放/暂停/上下曲控制 iPhone；都是**下次连接 CarPlay 生效**。
 
@@ -272,6 +278,16 @@ iPhone 会在导航播报前发 `duckAudio`。当前实现只把事件透传给�
 ### 5.1 Siri 语音键
 
 **在哪开**：设置 → 车辆 → 方向盘按键 → **方向盘唤醒 Siri**。默认开启，关闭后不再接管 Siri 按键，下级选项隐藏。CarPlay 未连接或通话中不接管。
+
+两种媒体集成方式下，这一块长得不一样：
+
+| DiPlay 直接接管 | HY 代理 |
+| --- | --- |
+| ![直接接管模式下的方向盘按键设置](screenshots/settings-wheel-siri-direct.png) | ![HY 代理模式下的方向盘按键设置](screenshots/settings-wheel-siri-hy.png) |
+
+| 直接接管：选短按还是长按 | HY 代理：选按键组 |
+| --- | --- |
+| ![语音键唤醒 Siri 短按/长按](screenshots/settings-wheel-siri-press.png) | ![HY Siri 按键 155/156 与 312/303](screenshots/settings-wheel-siri-hy-keys.png) |
 
 - **DiPlay 直接接管**：选择短按或长按，另一种按法留给原车助手。默认短按，修改立即生效。
 - **HY 代理**。选择 **155/156** 或 **312/303**，并在 HY 方向盘设置中选择对应的“模拟按键切换”。同组两个键码都唤醒 Siri。
