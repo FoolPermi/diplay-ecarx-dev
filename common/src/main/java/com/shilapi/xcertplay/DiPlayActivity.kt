@@ -160,6 +160,18 @@ internal object SettingsInformationArchitecture {
     )
 }
 
+/**
+ * Whether the settings page offers key learning for the wheel keys DiPlay does not act on.
+ *
+ * Off: DiPlay is a CarPlay receiver, and the keys it acts on are already mapped — the voice key opens
+ * Siri (a short press while CarPlay owns it, a long press stays with the car) and next / previous / play
+ * reach CarPlay themselves. The Siri key switch therefore stays visible; the learning list for
+ * everything else does not. On the car the ECARX interception delivered nothing but the voice key (31
+ * presses, all key=200231) and the accessibility service delivered nothing at all, so that list could
+ * only ever time out in front of a driver. Flip this to true to bring it back for diagnosis.
+ */
+private const val WHEEL_KEY_LEARNING_VISIBLE = false
+
 /** DiAuto's visual language, with a connection flow for an independent CarPlay receiver. */
 class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     private val handler = Handler(Looper.getMainLooper())
@@ -3655,6 +3667,15 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     private fun wheelKeysSettings(card: LinearLayout) {
         if (com.shilapi.xcertplay.hud.EcarxCapabilities.detect(this).identified) {
             card.addView(label(getString(R.string.settings_ecarx_wheel_automatic), 14, MUTED))
+            // Which of the two presses DiPlay owns. The key service marks each broadcast with short or
+            // long, so the other one is left alone and still reaches the car's own assistant.
+            val presses = VoiceKeyPress.entries
+            choice(card, getString(R.string.settings_voice_key_press),
+                listOf(getString(R.string.settings_voice_key_press_short),
+                    getString(R.string.settings_voice_key_press_long)),
+                presses.indexOf(MediaSessionSettings.voiceKeyPress(this)).coerceAtLeast(0),
+                reconnects = false) { MediaSessionSettings.setVoiceKeyPress(this, presses[it]) }
+            card.addView(label(getString(R.string.settings_voice_key_press_description), 12, MUTED))
         }
         EcarxHicarControl.state(this)?.let { hicar ->
             toggle(card, getString(R.string.settings_disable_factory_hicar),
@@ -3678,28 +3699,40 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 render()
             }
         }
-        settingsDetails(card, R.string.settings_custom_wheel_keys, customWheelKeysExpanded, { customWheelKeysExpanded = it }) { card ->
-            ecarxSwKeyControls(card)
-            card.addView(label(getString(R.string.settings_generic_wheel_keys), 16, MUTED))
-            val zoomAvailable = wheelMapZoomAvailable()
-            val vehicleKeysOn = WheelZoomSettings.joystick(this) ||
-                (zoomAvailable && WheelZoomSettings.enabled(this))
-            if (WheelZoomSettings.siriKey(this) || WheelZoomSettings.mediaPlayPause(this) || vehicleKeysOn) {
-                wheelKeyServiceControls(card)
-            }
-            siriKeyControls(card)
-            toggle(card, getString(R.string.wheel_media_play_pause),
+        // DiPlay is a CarPlay receiver, so the only wheel key it acts on here is the voice key that
+        // opens Siri (a short press while CarPlay owns the key; a long press stays with the car). That
+        // switch is always offered. Learning the other keys was offered too, but on the car neither
+        // channel heard anything else — 31 intercepted presses, every one key=200231, and nothing
+        // through the accessibility service in 1039 s — so the learning list is behind
+        // [WHEEL_KEY_LEARNING_VISIBLE] instead of sitting in the settings to time out in front of a driver.
+        val zoomAvailable = wheelMapZoomAvailable()
+        val vehicleKeysOn = WheelZoomSettings.joystick(this) ||
+            (zoomAvailable && WheelZoomSettings.enabled(this))
+        if (WheelZoomSettings.siriKey(this) || WheelZoomSettings.mediaPlayPause(this) || vehicleKeysOn) {
+            wheelKeyServiceControls(card)
+        }
+        siriKeyControls(card)
+        if (WHEEL_KEY_LEARNING_VISIBLE) learntWheelKeyControls(card)
+    }
+
+    /** The key learning for every wheel key DiPlay does not act on; off by [WHEEL_KEY_LEARNING_VISIBLE]. */
+    private fun learntWheelKeyControls(card: LinearLayout) {
+        settingsDetails(card, R.string.settings_custom_wheel_keys, customWheelKeysExpanded,
+            { customWheelKeysExpanded = it }) { inner ->
+            ecarxSwKeyControls(inner)
+            inner.addView(label(getString(R.string.settings_generic_wheel_keys), 16, MUTED))
+            toggle(inner, getString(R.string.wheel_media_play_pause),
                 getString(R.string.wheel_media_play_pause_description),
                 WheelZoomSettings.mediaPlayPause(this)) {
                 WheelZoomSettings.setMediaPlayPause(this, it)
                 render()
             }
             if (WheelZoomSettings.mediaPlayPause(this)) {
-                wheelKeyAssignButton(card, WheelZoomSettings.Role.MEDIA_PLAY_PAUSE,
+                wheelKeyAssignButton(inner, WheelZoomSettings.Role.MEDIA_PLAY_PAUSE,
                     getString(R.string.wheel_key_role_media_play_pause))
             }
             // Keep previously configured controls reachable even if nothing else is turned on.
-            if (zoomAvailable || WheelZoomSettings.joystick(this)) wheelKeyControls(card)
+            if (wheelMapZoomAvailable() || WheelZoomSettings.joystick(this)) wheelKeyControls(inner)
         }
     }
 
@@ -3938,15 +3971,63 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         cancelKeyLearning()
         windowLearning = WindowKeyLearning(role, cancelled, refused, done)
         handler.postDelayed(endWindowLearning, WheelKeyService.LEARNING_TIMEOUT_MILLIS)
+        // On an ECARX head unit a wheel press never reaches this window as a KeyEvent (the accessibility
+        // service sees none either), so the same ROM interception the CarPlay screen runs on is armed for
+        // the learning. The media role does not use it: that action has its own entry in the ECARX learning.
+        if (role == WheelZoomSettings.Role.SIRI) armEcarxSwKeyIntercept()
+        return true
+    }
+
+    /**
+     * Assigns [key] to the pending window learning; false leaves the press to the head unit.
+     *
+     * Both the settings window's own key events and the ECARX interception land here: on an ECARX head
+     * unit the interception carries a bare key code, with no scan code or input device to compare.
+     */
+    private fun completeWindowLearning(learning: WindowKeyLearning, key: WheelKey, source: String): Boolean {
+        if (windowLearning !== learning) return false
+        if (key.code == KeyEvent.KEYCODE_BACK) {
+            cancelKeyLearning()
+            return false
+        }
+        val enabled = when (learning.role) {
+            WheelZoomSettings.Role.SIRI -> WheelZoomSettings.siriKey(this)
+            WheelZoomSettings.Role.MEDIA_PLAY_PAUSE -> WheelZoomSettings.mediaPlayPause(this)
+            else -> false
+        }
+        if (inCall(this) || !enabled) {
+            cancelKeyLearning()
+            return false
+        }
+        if (learning.role == WheelZoomSettings.Role.MEDIA_PLAY_PAUSE &&
+            CarPlayRemoteKeys.isProtectedNavigationKey(key.code)) {
+            toast(getString(R.string.wheel_media_navigation_reserved))
+            return true
+        }
+        handler.removeCallbacks(endWindowLearning)
+        windowLearning = null
+        disarmEcarxSwKeyIntercept()
+        val taken = WheelZoomSettings.conflict(this, learning.role, key)
+        if (taken != null) {
+            Log.i(WheelKeyService.TAG, "${learning.role} key $key refused: it is the $taken key (learnt in $source)")
+            learning.refused(taken)
+        } else {
+            WheelZoomSettings.assign(this, learning.role, key)
+            Log.i(WheelKeyService.TAG, "${learning.role} key is now $key (learnt in $source)")
+            learning.done(key)
+        }
         return true
     }
 
     private fun cancelKeyLearning() {
         WheelKeyService.cancelLearning()
         handler.removeCallbacks(endWindowLearning)
-        val cancelled = windowLearning?.cancelled
+        val pending = windowLearning
         windowLearning = null
-        cancelled?.invoke()
+        // Armed only for the length of this learning; the ECARX action learning arms the same handle,
+        // so it is left alone while that one is waiting.
+        if (pending != null && ecarxSwLearning == null) disarmEcarxSwKeyIntercept()
+        pending?.cancelled?.invoke()
         applyPendingAppearanceRender()
     }
 
@@ -3981,10 +4062,11 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
      * wheel codes, which a normal `dispatchKeyEvent` never receives. Without this the "方控学习后
      * 按键无反应" symptom occurs: the wheel reports private codes the standard key path ignores.
      *
-     * Held only while a key is being learnt. The ROM's interception API is per-process and every
-     * live registration answers the same press, so a permanent one here would sit next to the
-     * CarPlay screen's own registration; a press this screen does not consume can then fall through
-     * to the factory voice assistant — the double answer reported from the car.
+     * Held only while a key is being learnt — either one of the eight ECARX actions or a custom Siri key.
+     * The ROM's interception API is per-process and every live registration answers the same press, so a
+     * permanent one here would sit next to the CarPlay screen's own registration; a press this screen does
+     * not consume can then fall through to the factory voice assistant — the double answer reported from
+     * the car.
      */
     private fun armEcarxSwKeyIntercept() {
         if (ecarxSwKeyHandle != null) return
@@ -3996,7 +4078,12 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                     runOnUiThread { learnEcarxSwKey(keyCode) }
                     return true
                 }
-                return false
+                val learning = windowLearning ?: return false
+                // A custom Siri key: this callback is the only place its press is ever seen on an ECARX
+                // head unit, and the wheel reports no scan code or input device with it.
+                val key = WheelKey(keyCode, 0, "ECARX interception")
+                runOnUiThread { completeWindowLearning(learning, key, "the ECARX interception") }
+                return true
             }
             override fun onKeyReleased(keyCode: Int): Boolean = false
         }, "settings")
@@ -4212,33 +4299,9 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         ) {
             val learning = windowLearning
             if (learning == null || event.keyCode == KeyEvent.KEYCODE_BACK) return@filter WheelZoomKeys.Action.PASS
-            if (learning.role == WheelZoomSettings.Role.MEDIA_PLAY_PAUSE &&
-                CarPlayRemoteKeys.isProtectedNavigationKey(event.keyCode)) {
-                toast(getString(R.string.wheel_media_navigation_reserved))
-                return@filter WheelZoomKeys.Action.CONSUME
-            }
-            val enabled = when (learning.role) {
-                WheelZoomSettings.Role.SIRI -> WheelZoomSettings.siriKey(this)
-                WheelZoomSettings.Role.MEDIA_PLAY_PAUSE -> WheelZoomSettings.mediaPlayPause(this)
-                else -> false
-            }
-            if (inCall(this) || !enabled) {
-                cancelKeyLearning()
-                return@filter WheelZoomKeys.Action.PASS
-            }
-            handler.removeCallbacks(endWindowLearning)
-            windowLearning = null
-            val key = WheelKey.of(event)
-            val taken = WheelZoomSettings.conflict(this, learning.role, key)
-            if (taken != null) {
-                Log.i(WheelKeyService.TAG, "${learning.role} key $key refused: it is the $taken key (learnt in the settings window)")
-                learning.refused(taken)
-            } else {
-                WheelZoomSettings.assign(this, learning.role, key)
-                Log.i(WheelKeyService.TAG, "${learning.role} key is now $key (learnt in the settings window)")
-                learning.done(key)
-            }
-            WheelZoomKeys.Action.CONSUME
+            if (completeWindowLearning(learning, WheelKey.of(event), "the settings window")) {
+                WheelZoomKeys.Action.CONSUME
+            } else WheelZoomKeys.Action.PASS
         }
         return action != WheelZoomKeys.Action.PASS || super.dispatchKeyEvent(event)
     }

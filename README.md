@@ -44,11 +44,11 @@ Where each feature is enabled, what it needs first, and how to tell it works: [f
 | Music through CarPlay, keep Bluetooth calls | **Settings → Audio → Bluetooth audio**: enable “Pause Bluetooth media for CarPlay” and disable “CarPlay audio over the car's Bluetooth” |
 | Wireless connection | Choose the car hotspot, Wi-Fi Direct or existing Wi-Fi in connection setup, then follow the prompts |
 | Automatic connection at startup | **Settings → Connection → Automatic connection**: enable “Open after the car starts” and “Connect when DiPlay opens” |
-| Siri from the wheel | No setup: short-press works once CarPlay is connected. **Custom key learning is not supported in this version — leave it alone** |
+| Siri from the wheel | Nothing to set up: the **short press** works once CarPlay is connected, and **Settings → Vehicle → Steering-wheel keys → Wake Siri with the voice key** switches it to a long press |
 
 **If you use HY, disable its steering-wheel control takeover.**
 
-**Wheel voice key:** while CarPlay is connected DiPlay takes over the **short press** automatically — no switch, no learning; it unbinds when the session ends. It requires all of: the head unit identified as Lynk/Geely, media owner set to ECARX, and no call in progress. With HY (media owner = Android) the key goes to HY. Custom key learning is not supported in this version.
+**Wheel voice key:** while CarPlay is connected DiPlay takes over one press of the voice key — the **short press** by default, switchable to the **long press** under **Settings → Vehicle → Steering-wheel keys** — and unbinds when the session ends. The other press stays with the car's own assistant. It requires all of: the head unit identified as Lynk/Geely, media owner set to ECARX, and no call in progress. With HY (media owner = Android) the key goes to HY. Custom key learning is not offered in this version.
 
 Keep “Mirror the full screen to the instrument cluster” off when you only want navigation and song information. After changing settings, reconnect when prompted.
 

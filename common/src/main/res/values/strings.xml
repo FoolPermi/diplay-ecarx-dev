@@ -931,7 +931,11 @@
     <string name="settings_existing_wifi_interface_description">Only for units whose LAN connection runs on an interface Android does not report as Wi-Fi, for example a USB network card on eth1. Leave empty to pick it automatically.</string>
     <string name="settings_custom_wheel_keys">Customize steering-wheel keys</string>
     <string name="settings_generic_wheel_keys">Generic key learning</string>
-    <string name="settings_ecarx_wheel_automatic">While CarPlay is connected, the factory voice-key short press is handled automatically. Learn a key only when you need a custom assignment.</string>
+    <string name="settings_ecarx_wheel_automatic">While CarPlay is connected DiPlay takes over one press of the factory voice key (the short press by default) and leaves the other one to the car. DiPlay handles only the key that wakes Siri and leaves the other wheel keys to the head unit.</string>
+    <string name="settings_voice_key_press">Wake Siri with the voice key</string>
+    <string name="settings_voice_key_press_short">Short press</string>
+    <string name="settings_voice_key_press_long">Long press</string>
+    <string name="settings_voice_key_press_description">Which press of the wheel voice key goes to Siri; the other one keeps the car\'s own assistant, for example a long press opening the factory voice. Takes effect immediately without a reconnect, and never during a call.</string>
     <string name="settings_audio_tuning">Sound troubleshooting</string>
     <string name="settings_bluetooth_audio">Bluetooth audio</string>
     <string name="settings_expand">Expand</string>

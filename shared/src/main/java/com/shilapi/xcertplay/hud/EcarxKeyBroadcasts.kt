@@ -18,13 +18,20 @@ object EcarxKeyBroadcasts {
     private const val ACTION_VOICE = "ecarx.intent.action.ECARX_KEY_RVOICEASSIST_EVENT"
     private const val ACTION_CALL = "ecarx.intent.action.ECARX_KEY_RCALL_EVENT"
 
-    /** Owns only an unmarked short press while [shouldHandle] permits it; long presses pass through. */
-    fun registerVoice(context: Context, shouldHandle: () -> Boolean, onPress: (ordered: Boolean) -> Unit): BroadcastReceiver {
+    /**
+     * Owns only the presses [takesPress] accepts while [shouldHandle] permits it; every other press
+     * passes through to the factory assistant.
+     *
+     * The key service marks each press with `ecarx.extra.ECARX_KEY_ACTION_TYPE` — 0 for a short press,
+     * 1 for a long one — so the caller picks which of the two DiPlay owns and leaves the other alone.
+     */
+    fun registerVoice(context: Context, takesPress: (Int) -> Boolean = { it == 0 },
+        shouldHandle: () -> Boolean, onPress: (ordered: Boolean) -> Unit): BroadcastReceiver {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context, intent: Intent) {
                 if (intent.action != ACTION_VOICE) return
-                if (intent.getIntExtra("ecarx.extra.HY", 0) == 1 ||
-                    intent.getIntExtra("ecarx.extra.ECARX_KEY_ACTION_TYPE", -1) != 0 || !shouldHandle()) return
+                val press = intent.getIntExtra("ecarx.extra.ECARX_KEY_ACTION_TYPE", -1)
+                if (intent.getIntExtra("ecarx.extra.HY", 0) == 1 || !takesPress(press) || !shouldHandle()) return
                 if (isOrderedBroadcast) abortBroadcast()
                 onPress(isOrderedBroadcast)
             }

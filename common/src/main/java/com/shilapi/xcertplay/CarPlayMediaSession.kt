@@ -621,23 +621,31 @@ internal object CarPlayMediaSession {
         if (!managesVehicleKeys() || !EcarxCapabilities.detect(context).identified) return
         voiceKeySession = session
         externalSiriKey.reset()
+        // The driver picks which press DiPlay owns; the other one stays with the factory assistant.
+        val ownedPress = MediaSessionSettings.voiceKeyPress(context)
         voiceKeyReceiver = runCatching {
-            EcarxKeyBroadcasts.registerVoice(context, shouldHandle = {
-                synchronized(this) {
-                    val eligible = controller === expected && voiceKeySession === session &&
-                        expected.activeAirPlaySession() === session && !inCall(context)
-                    if (!eligible) {
-                        externalSiriKey.reset()
-                        delayedVoiceSiri?.let(mainHandler::removeCallbacks)
-                        delayedVoiceSiri = null
+            EcarxKeyBroadcasts.registerVoice(
+                context,
+                // Read per press, so switching short / long in the settings takes effect at once.
+                takesPress = { it == MediaSessionSettings.voiceKeyPress(context).type },
+                shouldHandle = {
+                    synchronized(this) {
+                        val eligible = controller === expected && voiceKeySession === session &&
+                            expected.activeAirPlaySession() === session && !inCall(context)
+                        if (!eligible) {
+                            externalSiriKey.reset()
+                            delayedVoiceSiri?.let(mainHandler::removeCallbacks)
+                            delayedVoiceSiri = null
+                        }
+                        eligible
                     }
-                    eligible
-                }
-            }) { ordered ->
+                },
+            ) { ordered ->
                 synchronized(this) {
+                    val press = MediaSessionSettings.voiceKeyPress(context).name.lowercase()
                     // An unordered broadcast cannot suppress the factory assistant.
                     if (!ordered) {
-                        WheelKeyLog.note("ECARX voice short press ordered=false queued=false")
+                        WheelKeyLog.note("ECARX voice $press press ordered=false queued=false")
                         return@synchronized
                     }
                     val assignedVoice = WheelZoomSettings.key(context, WheelZoomSettings.Role.SIRI)?.takeIf {
@@ -668,7 +676,7 @@ internal object CarPlayMediaSession {
                         delayedVoiceSiri?.let(mainHandler::removeCallbacks)
                         delayedVoiceSiri = null
                         val queued = externalSiriKey.opens(SystemClock.uptimeMillis()) && expected.requestSiri()
-                        WheelKeyLog.note("ECARX voice short press ordered=true queued=$queued")
+                        WheelKeyLog.note("ECARX voice $press press ordered=true queued=$queued")
                     }
                 }
             }
@@ -676,7 +684,8 @@ internal object CarPlayMediaSession {
             WheelKeyLog.note("ECARX voice registration failed=${it.javaClass.simpleName}")
         }.getOrNull()
         if (voiceKeyReceiver == null) voiceKeySession = null
-        WheelKeyLog.note("ECARX voice short press registered=${voiceKeyReceiver != null} priority=${Int.MAX_VALUE}")
+        WheelKeyLog.note("ECARX voice press registered=${voiceKeyReceiver != null} " +
+            "owning=${ownedPress.name.lowercase()} priority=${Int.MAX_VALUE}")
     }
 
     @Synchronized

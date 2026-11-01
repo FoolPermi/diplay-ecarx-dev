@@ -60,24 +60,22 @@ class SimplifiedSettingsUiTest {
         } finally { dialog.dismiss() }
     }
 
-    @Test fun customWheelKeysAreCollapsedWithoutChangingSavedAssignments() {
+    @Test fun wheelKeyCardKeepsTheSiriSwitchAndDropsTheLearningList() {
         WheelZoomSettings.setMediaPlayPause(activity, true)
         val root = settings(SettingsCategory.VEHICLE)
-        val media = views(root).filterIsInstance<TextView>().first {
+        // The voice key that opens Siri is the one wheel key DiPlay acts on, so its switch stays.
+        assertTrue(hasTitle(root, R.string.wheel_siri_key))
+        // The learning list for every other key is not offered at all, instead of sitting there until it
+        // times out: on the car those keys never reached either channel.
+        assertFalse(hasTitle(root, R.string.settings_custom_wheel_keys))
+        assertFalse(hasTitle(root, R.string.settings_generic_wheel_keys))
+        assertFalse(hasTitle(root, R.string.ecarx_sw_key_title))
+        assertFalse(views(root).filterIsInstance<TextView>().any {
             it.contentDescription == activity.getString(R.string.wheel_media_play_pause)
-        }
-        val details = views(root).filterIsInstance<Button>().single {
-            it.text.startsWith(activity.getString(R.string.settings_custom_wheel_keys) + " · ")
-        }
-        assertFalse(visible(media))
-        screenshot(root, "vehicle-collapsed")
-        details.performClick()
-        assertTrue(visible(media))
+        })
+        // Hiding the UI is not a reset: a mapping saved before the change survives.
         assertTrue(WheelZoomSettings.mediaPlayPause(activity))
-        screenshot(root, "vehicle-expanded")
-        details.performClick()
-        assertFalse(visible(media))
-        assertTrue(WheelZoomSettings.mediaPlayPause(activity))
+        screenshot(root, "vehicle-wheel-keys")
     }
 
     @Test fun settingsLiveWhereDriversLookForThem() {
@@ -122,7 +120,7 @@ class SimplifiedSettingsUiTest {
         screenshot(focused, "media-session-mode")
     }
 
-    @Test fun searchOpensTheCollapsedControls() {
+    @Test fun searchFindsTheSiriSwitchWithoutTheLearningList() {
         ReflectionHelpers.setField(activity, "settingsSectionFilter", null)
         val result = DiPlayActivity.SettingsSearchResult(
             activity.getString(R.string.wheel_siri_key), SettingsCategory.VEHICLE)
@@ -132,7 +130,9 @@ class SimplifiedSettingsUiTest {
             it.contentDescription == result.title
         }
         assertTrue(visible(siri))
-        assertTrue(ReflectionHelpers.getField(activity, "customWheelKeysExpanded"))
+        assertTrue(views(activity.window.decorView).filterIsInstance<Button>().none {
+            it.text.startsWith(activity.getString(R.string.settings_custom_wheel_keys))
+        })
     }
 
     @Test @Config(sdk = [28]) fun carHotspotKeepsReadAndStartTogetherAndModificationUnderMore() {

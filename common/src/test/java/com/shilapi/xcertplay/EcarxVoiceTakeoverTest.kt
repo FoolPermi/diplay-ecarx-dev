@@ -57,6 +57,7 @@ internal class EcarxVoiceTakeoverTest {
     @After fun cleanup() {
         CarPlayMediaSession.detach(controller)
         MediaSessionSettings.setMode(app, MediaSessionMode.ANDROID)
+        MediaSessionSettings.setVoiceKeyPress(app, VoiceKeyPress.SHORT)
         app.unregisterReceiver(factory)
         app.getSystemService(AudioManager::class.java).mode = AudioManager.MODE_NORMAL
         CarPlayBackgroundSession.clear()
@@ -85,6 +86,33 @@ internal class EcarxVoiceTakeoverTest {
         SystemClock.sleep(WheelSiriKey.REPEAT_GAP_MILLIS)
         send(0)
         verify(controller, times(2)).requestSiri()
+    }
+
+    @Test fun longPressTakeoverLeavesTheShortPressToTheCar() {
+        MediaSessionSettings.setVoiceKeyPress(app, VoiceKeyPress.LONG)
+        `when`(controller.activeAirPlaySession()).thenReturn(phone)
+        CarPlayMediaSession.onSessionActive(controller, phone)
+        assertTrue(CarPlayMediaSession.ecarxVoiceKeyActive())
+        // The short press is not DiPlay's any more: it is neither aborted nor turned into a Siri request.
+        send(0)
+        assertEquals(1, factoryPresses)
+        verify(controller, never()).requestSiri()
+        SystemClock.sleep(WheelSiriKey.REPEAT_GAP_MILLIS)
+        // The long press is: taken off the factory and sent to Siri.
+        send(1)
+        assertEquals(1, factoryPresses)
+        verify(controller, times(1)).requestSiri()
+    }
+
+    @Test fun theChosenPressIsReadOnEveryPress() {
+        MediaSessionSettings.setVoiceKeyPress(app, VoiceKeyPress.LONG)
+        `when`(controller.activeAirPlaySession()).thenReturn(phone)
+        CarPlayMediaSession.onSessionActive(controller, phone)
+        // The receiver decides per press, so flipping the switch while connected takes effect at once.
+        MediaSessionSettings.setVoiceKeyPress(app, VoiceKeyPress.SHORT)
+        send(1)
+        assertEquals(1, factoryPresses)
+        verify(controller, never()).requestSiri()
     }
 
     @Test fun androidMediaLeavesVoiceBroadcastsAndRawKeysToHyButAcceptsExplicitSiriAction() {

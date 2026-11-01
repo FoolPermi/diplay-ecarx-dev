@@ -889,7 +889,11 @@
     <string name="settings_existing_wifi_interface_description">僅用於把同一區域網路連線放在 Android 不認為是 Wi-Fi 的網路介面上的車機，例如 USB 網卡上的 eth1。留空則自動選擇。</string>
     <string name="settings_custom_wheel_keys">自訂方向盤按鍵</string>
     <string name="settings_generic_wheel_keys">通用按鍵學習</string>
-    <string name="settings_ecarx_wheel_automatic">CarPlay 連線期間自動處理原車語音鍵短按，無需先學習。需要更改按鍵用途時，再展開自訂設定。</string>
+    <string name="settings_ecarx_wheel_automatic">CarPlay 連線期間由 DiPlay 接管原車語音鍵的其中一檔按鍵（預設短按），另一檔仍留給原車。DiPlay 只處理喚醒 Siri 的按鍵，其餘按鍵保持車機原有邏輯。</string>
+    <string name="settings_voice_key_press">語音鍵喚醒 Siri</string>
+    <string name="settings_voice_key_press_short">短按</string>
+    <string name="settings_voice_key_press_long">長按</string>
+    <string name="settings_voice_key_press_description">選擇哪一檔語音鍵交給 Siri，另一檔保留原車助理（例如長按喚起原廠語音）。立即生效，無需重新連線；通話中不接管。</string>
     <string name="settings_audio_tuning">聲音異常排查</string>
     <string name="settings_bluetooth_audio">藍牙音訊</string>
     <string name="settings_expand">展開</string>

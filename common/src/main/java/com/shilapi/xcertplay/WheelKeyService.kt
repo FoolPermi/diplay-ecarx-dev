@@ -1053,6 +1053,16 @@ object WheelZoomSettings {
 
     fun isSiriKey(context: Context, key: WheelKey): Boolean = siriKey(context) && key(context, Role.SIRI) == key
 
+    /**
+     * The Siri role matched by key code alone.
+     *
+     * The ECARX key interception reports a bare code: no scan code and no input device, so the [WheelKey]
+     * a press from it builds can never equal the one stored here. Matching on the code is the only way a
+     * custom Siri key learnt through that channel can be found again when it is pressed.
+     */
+    fun isSiriKeyCode(context: Context, keyCode: Int): Boolean =
+        siriKey(context) && key(context, Role.SIRI)?.code == keyCode
+
     fun isMediaPlayPauseKey(context: Context, key: WheelKey): Boolean =
         mediaPlayPause(context) && !CarPlayRemoteKeys.isProtectedNavigationKey(key.code) &&
             key(context, Role.MEDIA_PLAY_PAUSE) == key
