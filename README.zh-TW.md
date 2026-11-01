@@ -23,7 +23,7 @@ DiPlay 讓你在領克車機上使用 iPhone 的導航、音樂、Siri 和通話
 
 只顯示導航提示和歌曲資訊時，保持「整屏鏡像到儀表」關閉。修改設定後，依照畫面提示重新連接。
 
-目前 USB 連接仍有問題；拔掉 USB 後會自動回到無線。遇到異常，請到 **設定 → 診斷 → 儲存診斷報告**。
+建議首次使用無線配對。如果首次透過 USB 建立了本車的 CarPlay 紀錄，改用無線前須在 iPhone 的 CarPlay 設定中移除本車，再重新配對並先使用無線。車機 USB 連接仍有問題，USB 與無線切換及車機 USB 問題暫不繼續排查。遇到異常，請到 **設定 → 診斷 → 儲存診斷報告**。
 
 基於 [DiPlay](https://github.com/shihabal3amri/DiPlay)、[DiPlay-ECARX](https://github.com/jiopia/DiPlay-ECARX) 和 [xcertplay](https://github.com/shilapi/xcertplay)，部分介面改編自 [DiAuto](https://github.com/shihabal3amri/DiAuto)。許可與第三方聲明見 [LICENSE](LICENSE) 及 [相關說明](docs/THIRD_PARTY_NOTICES.md)。
 

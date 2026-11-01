@@ -94,6 +94,36 @@ class WheelKeysSettingsScreenshotsTest {
         } finally { activity.finish() }
     }
 
+    @Test @Config(sdk = [28]) fun hyBackgroundPermissionActionAppearsOnlyWhenNeeded() {
+        val activity = Robolectric.buildActivity(DiPlayActivity::class.java).get()
+        activity.setTheme(android.R.style.Theme_Material_NoActionBar)
+        val app = activity.application
+        MediaSessionSettings.setMode(activity, MediaSessionMode.ANDROID)
+        MediaSessionSettings.setWheelSiriEnabled(activity, true)
+        for (granted in listOf(false, true)) {
+            if (granted) org.robolectric.Shadows.shadowOf(app).grantPermissions(android.Manifest.permission.READ_LOGS)
+            else org.robolectric.Shadows.shadowOf(app).denyPermissions(android.Manifest.permission.READ_LOGS)
+            val row = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
+            DiPlayActivity::class.java.getDeclaredMethod("wheelKeysSettings", LinearLayout::class.java)
+                .apply { isAccessible = true }.invoke(activity, row)
+            val buttonExists = allViews(row).filterIsInstance<TextView>()
+                .any { it.text == activity.getString(R.string.settings_hy_siri_grant_logs) }
+            assertTrue(buttonExists == !granted)
+            if (!granted) {
+                row.measure(View.MeasureSpec.makeMeasureSpec(1920, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(1080, View.MeasureSpec.EXACTLY))
+                row.layout(0, 0, 1920, 1080)
+                val bitmap = Bitmap.createBitmap(1920, 1080, Bitmap.Config.ARGB_8888)
+                row.draw(Canvas(bitmap))
+                val file = File("build/reports/wheel-keys-ui/hy-background-permission.png")
+                requireNotNull(file.parentFile).mkdirs()
+                file.outputStream().use { assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+                bitmap.recycle()
+            }
+        }
+        activity.finish()
+    }
+
     private fun allViews(view: View): Sequence<View> = sequence {
         yield(view)
         if (view is ViewGroup) for (i in 0 until view.childCount) yieldAll(allViews(view.getChildAt(i)))

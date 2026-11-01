@@ -24,7 +24,7 @@ DiPlay 让你在领克车机上使用 iPhone 的导航、音乐、Siri 和通话
 
 只显示导航提示和歌曲信息时，保持「整屏镜像到仪表」关闭。设置修改后，按界面提示重新连接。
 
-目前 USB 连接仍有问题；拔掉 USB 后会自动回到无线。遇到异常，请到 **设置 → 诊断 → 保存诊断报告**。
+建议首次使用无线配对。如果首次通过 USB 建立了本车的 CarPlay 记录，改用无线前须在 iPhone 的 CarPlay 设置中移除本车，再重新配对并先使用无线。车机 USB 连接仍有问题，USB 与无线切换及车机 USB 问题暂不继续排查。遇到异常，请到 **设置 → 诊断 → 保存诊断报告**。
 
 基于 [DiPlay](https://github.com/shihabal3amri/DiPlay)、[DiPlay-ECARX](https://github.com/jiopia/DiPlay-ECARX) 和 [xcertplay](https://github.com/shilapi/xcertplay)，部分界面改编自 [DiAuto](https://github.com/shihabal3amri/DiAuto)。许可与第三方声明见 [LICENSE](LICENSE) 和 [相关说明](docs/THIRD_PARTY_NOTICES.md)。
 
@@ -54,4 +54,4 @@ Where each feature is enabled, what it needs first, and how to tell it works: [f
 
 Keep “Mirror the full screen to the instrument cluster” off when you only want navigation and song information. After changing settings, reconnect when prompted.
 
-USB connection issues remain unresolved; unplugging the cable now falls back to wireless automatically. To report a problem, choose **Settings → Diagnostics → Save diagnostic report**.
+Pair wirelessly first. If this car's CarPlay record was first created over USB, remove the car in iPhone CarPlay settings and pair again wirelessly before using wireless CarPlay. Head-unit USB issues remain unresolved; USB and wireless switching and the head-unit USB issues are not currently being pursued. To report a problem, choose **Settings → Diagnostics → Save diagnostic report**.

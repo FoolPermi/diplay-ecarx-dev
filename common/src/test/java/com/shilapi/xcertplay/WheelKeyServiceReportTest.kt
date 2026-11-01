@@ -28,6 +28,7 @@ class WheelKeyServiceReportTest {
     @Before fun setUp() {
         WheelKeyLog.reset()
         service = Robolectric.buildService(WheelKeyService::class.java).create().get()
+        AirPlayPersistence.saveDebugLogsEnabled(service, true)
         service.getSharedPreferences("diplay_navigation_wheel", Context.MODE_PRIVATE).edit().clear().commit()
         service.getSharedPreferences("diplay_wheel_map_zoom", Context.MODE_PRIVATE).edit().clear().commit()
         service.javaClass.getDeclaredMethod("onServiceConnected").apply { isAccessible = true }.invoke(service)
@@ -58,6 +59,15 @@ class WheelKeyServiceReportTest {
 
     /** The report's entries without their time of day. */
     private fun entries(): List<String> = report().drop(1).map { it.substringAfter("  ") }
+
+    @Test fun debugSwitchControlsPressDetailsDuringTheSession() {
+        AirPlayPersistence.saveDebugLogsEnabled(service, false)
+        assertFalse(press(KeyEvent.KEYCODE_F7))
+        assertEquals(listOf("wheel key service connected"), entries())
+        AirPlayPersistence.saveDebugLogsEnabled(service, true)
+        assertFalse(press(KeyEvent.KEYCODE_F7))
+        assertEquals(listOf("wheel key service connected", "key 137/0 device 7 left to the head unit"), entries())
+    }
 
     @Test fun aKeyNoFeatureUsesIsListedOnceAndStaysWithTheHeadUnit() {
         assertFalse(press(KeyEvent.KEYCODE_F7))
