@@ -18,6 +18,14 @@ internal object EcarxLaneIcon {
             setOf(-180) -> 5
             setOf(-90, 90) -> 6
             setOf(-90, 0, 90) -> 7
+            setOf(-180, -90) -> 11
+            // This OEM family has its own recommended ID (56), outside the usual +15 range.
+            setOf(-180, -90, 0) -> return when (highlight) {
+                0 -> 71
+                -90 -> 72
+                -180 -> 73
+                else -> if (lane.recommended) 56 else 49
+            }
             else -> return null
         }
         // The two-tone OEM icons retain the other paths while lighting only the selected one.
@@ -30,6 +38,7 @@ internal object EcarxLaneIcon {
                 -90 -> 37
                 else -> 38
             }
+            11 -> if (highlight == -90) 43 else 44
             else -> null
         }
         return base + if (highlight != null || lane.recommended) 15 else 0

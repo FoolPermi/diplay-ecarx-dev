@@ -22,6 +22,21 @@ class EcarxLaneIconTest {
         assertEquals(2, EcarxLaneIcon.forLane(LaneGuidanceLane(0, 0, listOf(-90, -90, 0), 90)))
     }
 
+    @Test fun compoundLeftUTurnKeepsEveryDirectionAndHighlightsTheSelectedBranch() {
+        val leftAndUTurn = listOf(-180, -90)
+        val threeDirections = listOf(0, -180, -90)
+        // Apple sent the straight branch only as the highlight on junction index 5.
+        assertEquals(71, EcarxLaneIcon.forLane(LaneGuidanceLane(0, 2, leftAndUTurn, 0)))
+        assertEquals(11, EcarxLaneIcon.forLane(LaneGuidanceLane(0, 0, leftAndUTurn, null)))
+        assertEquals(26, EcarxLaneIcon.forLane(LaneGuidanceLane(0, 2, leftAndUTurn, null)))
+        assertEquals(43, EcarxLaneIcon.forLane(LaneGuidanceLane(0, 2, leftAndUTurn, -90)))
+        assertEquals(44, EcarxLaneIcon.forLane(LaneGuidanceLane(0, 2, leftAndUTurn, -180)))
+        assertEquals(49, EcarxLaneIcon.forLane(LaneGuidanceLane(0, 0, threeDirections, null)))
+        assertEquals(56, EcarxLaneIcon.forLane(LaneGuidanceLane(0, 2, threeDirections, null)))
+        assertEquals(72, EcarxLaneIcon.forLane(LaneGuidanceLane(0, 1, threeDirections, -90)))
+        assertEquals(73, EcarxLaneIcon.forLane(LaneGuidanceLane(0, 2, threeDirections, -180)))
+    }
+
     @Test fun recordedBaiduStripKeepsBothUnhighlightedLanes() {
         val lanes = listOf(
             LaneGuidanceLane(0, 2, emptyList(), -90),

@@ -1,0 +1,667 @@
+{
+  "serial": "emulator-5584",
+  "source": "handoffs/real-car-20261101-v108-from-laptop/mac-mini-docs-20261101-v108/logs-private/cap-v106-20261101-session1/full.log",
+  "originalWireStamps": {
+    "0": "11:36:43.509",
+    "5": "11:36:43.515",
+    "7": "11:36:43.542",
+    "3": "11:36:43.549"
+  },
+  "guidance": "58 Apple R4 navigation frames, four unmodified Apple v106 lane payloads, controlled 5201 cursor/hide/stop; indices 8/9 use synthetic 5204.",
+  "checkpoints": [
+    {
+      "label": "valid-index0",
+      "index": 0,
+      "showing": true,
+      "navStatus": 1,
+      "laneIconIds": [
+        16,
+        0,
+        0,
+        0
+      ],
+      "errors": [],
+      "pixels": [
+        [
+          "renderer",
+          1,
+          16,
+          1.0,
+          {
+            "white": 235.0
+          }
+        ],
+        [
+          "primary-overlay",
+          1,
+          16,
+          0.933,
+          {
+            "white": 188.0
+          }
+        ],
+        [
+          "renderer",
+          2,
+          0,
+          0.999,
+          {
+            "grey": 56.0
+          }
+        ],
+        [
+          "primary-overlay",
+          2,
+          0,
+          0.92,
+          {
+            "grey": 45.0
+          }
+        ],
+        [
+          "renderer",
+          3,
+          0,
+          0.999,
+          {
+            "grey": 56.0
+          }
+        ],
+        [
+          "primary-overlay",
+          3,
+          0,
+          0.943,
+          {
+            "grey": 45.0
+          }
+        ],
+        [
+          "renderer",
+          4,
+          0,
+          0.999,
+          {
+            "grey": 57.0
+          }
+        ],
+        [
+          "primary-overlay",
+          4,
+          0,
+          0.944,
+          {
+            "grey": 46.0
+          }
+        ]
+      ]
+    },
+    {
+      "label": "compound-index7",
+      "index": 7,
+      "showing": true,
+      "navStatus": 1,
+      "laneIconIds": [
+        11,
+        30,
+        32
+      ],
+      "errors": [],
+      "pixels": [
+        [
+          "renderer",
+          1,
+          11,
+          0.999,
+          {
+            "grey": 56
+          }
+        ],
+        [
+          "primary-overlay",
+          1,
+          11,
+          0.918,
+          {
+            "grey": 45.0
+          }
+        ],
+        [
+          "renderer",
+          2,
+          30,
+          1.0,
+          {
+            "grey": 56.0,
+            "white": 235.0
+          }
+        ],
+        [
+          "primary-overlay",
+          2,
+          30,
+          0.948,
+          {
+            "grey": 45.0,
+            "white": 188.0
+          }
+        ],
+        [
+          "renderer",
+          3,
+          32,
+          1.0,
+          {
+            "grey": 57.0,
+            "white": 236.0
+          }
+        ],
+        [
+          "primary-overlay",
+          3,
+          32,
+          0.935,
+          {
+            "grey": 45.0,
+            "white": 188.0
+          }
+        ]
+      ]
+    },
+    {
+      "label": "restore-index0",
+      "index": 0,
+      "showing": true,
+      "navStatus": 1,
+      "laneIconIds": [
+        16,
+        0,
+        0,
+        0
+      ],
+      "errors": [],
+      "pixels": [
+        [
+          "renderer",
+          1,
+          16,
+          1.0,
+          {
+            "white": 235.0
+          }
+        ],
+        [
+          "primary-overlay",
+          1,
+          16,
+          0.933,
+          {
+            "white": 188.0
+          }
+        ],
+        [
+          "renderer",
+          2,
+          0,
+          0.999,
+          {
+            "grey": 56.0
+          }
+        ],
+        [
+          "primary-overlay",
+          2,
+          0,
+          0.92,
+          {
+            "grey": 45.0
+          }
+        ],
+        [
+          "renderer",
+          3,
+          0,
+          0.999,
+          {
+            "grey": 56.0
+          }
+        ],
+        [
+          "primary-overlay",
+          3,
+          0,
+          0.943,
+          {
+            "grey": 45.0
+          }
+        ],
+        [
+          "renderer",
+          4,
+          0,
+          0.999,
+          {
+            "grey": 57.0
+          }
+        ],
+        [
+          "primary-overlay",
+          4,
+          0,
+          0.944,
+          {
+            "grey": 46.0
+          }
+        ]
+      ]
+    },
+    {
+      "label": "compound-index5",
+      "index": 5,
+      "showing": true,
+      "navStatus": 1,
+      "laneIconIds": [
+        71,
+        15,
+        3
+      ],
+      "errors": [],
+      "pixels": [
+        [
+          "renderer",
+          1,
+          71,
+          0.999,
+          {
+            "grey": 56,
+            "white": 235.0
+          }
+        ],
+        [
+          "primary-overlay",
+          1,
+          71,
+          0.924,
+          {
+            "grey": 45,
+            "white": 188.0
+          }
+        ],
+        [
+          "renderer",
+          2,
+          15,
+          0.999,
+          {
+            "white": 235.0
+          }
+        ],
+        [
+          "primary-overlay",
+          2,
+          15,
+          0.938,
+          {
+            "white": 188.0
+          }
+        ],
+        [
+          "renderer",
+          3,
+          3,
+          0.999,
+          {
+            "grey": 56.0
+          }
+        ],
+        [
+          "primary-overlay",
+          3,
+          3,
+          0.937,
+          {
+            "grey": 45.0
+          }
+        ]
+      ]
+    },
+    {
+      "label": "hide-index5",
+      "index": 5,
+      "showing": false,
+      "navStatus": 1,
+      "laneIconIds": [],
+      "errors": [],
+      "pixels": []
+    },
+    {
+      "label": "reshow-index5",
+      "index": 5,
+      "showing": true,
+      "navStatus": 1,
+      "laneIconIds": [
+        71,
+        15,
+        3
+      ],
+      "errors": [],
+      "pixels": [
+        [
+          "renderer",
+          1,
+          71,
+          0.999,
+          {
+            "grey": 56,
+            "white": 235.0
+          }
+        ],
+        [
+          "primary-overlay",
+          1,
+          71,
+          0.924,
+          {
+            "grey": 45,
+            "white": 188.0
+          }
+        ],
+        [
+          "renderer",
+          2,
+          15,
+          0.999,
+          {
+            "white": 235.0
+          }
+        ],
+        [
+          "primary-overlay",
+          2,
+          15,
+          0.938,
+          {
+            "white": 188.0
+          }
+        ],
+        [
+          "renderer",
+          3,
+          3,
+          0.999,
+          {
+            "grey": 56.0
+          }
+        ],
+        [
+          "primary-overlay",
+          3,
+          3,
+          0.937,
+          {
+            "grey": 45.0
+          }
+        ]
+      ]
+    },
+    {
+      "label": "compound-index3",
+      "index": 3,
+      "showing": true,
+      "navStatus": 1,
+      "laneIconIds": [
+        44,
+        0,
+        0,
+        0,
+        3
+      ],
+      "errors": [],
+      "pixels": [
+        [
+          "renderer",
+          1,
+          44,
+          0.999,
+          {
+            "grey": 56.0,
+            "white": 235.0
+          }
+        ],
+        [
+          "primary-overlay",
+          1,
+          44,
+          0.912,
+          {
+            "grey": 45.0,
+            "white": 188.0
+          }
+        ],
+        [
+          "renderer",
+          2,
+          0,
+          0.999,
+          {
+            "grey": 56.0
+          }
+        ],
+        [
+          "primary-overlay",
+          2,
+          0,
+          0.92,
+          {
+            "grey": 45.0
+          }
+        ],
+        [
+          "renderer",
+          3,
+          0,
+          0.999,
+          {
+            "grey": 56.0
+          }
+        ],
+        [
+          "primary-overlay",
+          3,
+          0,
+          0.945,
+          {
+            "grey": 45.0
+          }
+        ],
+        [
+          "renderer",
+          4,
+          0,
+          0.999,
+          {
+            "grey": 57.0
+          }
+        ],
+        [
+          "primary-overlay",
+          4,
+          0,
+          0.941,
+          {
+            "grey": 46.0
+          }
+        ],
+        [
+          "renderer",
+          5,
+          3,
+          0.999,
+          {
+            "grey": 58.0
+          }
+        ],
+        [
+          "primary-overlay",
+          5,
+          3,
+          0.937,
+          {
+            "grey": 46.0
+          }
+        ]
+      ]
+    },
+    {
+      "label": "synthetic-double",
+      "index": 8,
+      "showing": true,
+      "navStatus": 1,
+      "laneIconIds": [
+        26,
+        43
+      ],
+      "errors": [],
+      "pixels": [
+        [
+          "renderer",
+          1,
+          26,
+          0.999,
+          {
+            "white": 235.0
+          }
+        ],
+        [
+          "primary-overlay",
+          1,
+          26,
+          0.924,
+          {
+            "white": 188.0
+          }
+        ],
+        [
+          "renderer",
+          2,
+          43,
+          1.0,
+          {
+            "grey": 56.0,
+            "white": 235.0
+          }
+        ],
+        [
+          "primary-overlay",
+          2,
+          43,
+          0.936,
+          {
+            "grey": 45.0,
+            "white": 188.0
+          }
+        ]
+      ]
+    },
+    {
+      "label": "synthetic-triple",
+      "index": 9,
+      "showing": true,
+      "navStatus": 1,
+      "laneIconIds": [
+        49,
+        56,
+        72,
+        73
+      ],
+      "errors": [],
+      "pixels": [
+        [
+          "renderer",
+          1,
+          49,
+          0.999,
+          {
+            "grey": 56
+          }
+        ],
+        [
+          "primary-overlay",
+          1,
+          49,
+          0.89,
+          {
+            "grey": 45.0
+          }
+        ],
+        [
+          "renderer",
+          2,
+          56,
+          0.999,
+          {
+            "white": 235.0
+          }
+        ],
+        [
+          "primary-overlay",
+          2,
+          56,
+          0.89,
+          {
+            "white": 188
+          }
+        ],
+        [
+          "renderer",
+          3,
+          72,
+          0.999,
+          {
+            "grey": 57.0,
+            "white": 236
+          }
+        ],
+        [
+          "primary-overlay",
+          3,
+          72,
+          0.918,
+          {
+            "grey": 45.0,
+            "white": 188.0
+          }
+        ],
+        [
+          "renderer",
+          4,
+          73,
+          0.999,
+          {
+            "grey": 57,
+            "white": 236.0
+          }
+        ],
+        [
+          "primary-overlay",
+          4,
+          73,
+          0.902,
+          {
+            "grey": 46.0,
+            "white": 189.0
+          }
+        ]
+      ]
+    },
+    {
+      "label": "stop",
+      "index": null,
+      "showing": false,
+      "navStatus": 0,
+      "laneIconIds": [],
+      "errors": [],
+      "pixels": []
+    }
+  ]
+}
