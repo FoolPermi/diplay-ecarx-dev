@@ -18,8 +18,9 @@ public interface INaviInteraction {
     void notifyTurnByTurnStopped();
     void registerNavigationInteractionCallback(INavigationInteractionCallback callback);
 
-    // Only registration is exercised; do not invent cluster-to-app callback payloads.
-    interface INavigationInteractionCallback { }
+    // Observed on the target head unit and in the shipped 753 navigation plugin.
+    interface INavigationInteractionCallback { void onDoInteractionAction(int action, IAddress address); }
+    interface IAddress { }
     interface ILaneInfo {
         int getLaneNumber();
         int getLaneBackIconId();

@@ -6,6 +6,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.Surface
 import com.shilapi.xcertplay.airplay.AirPlaySession
+import com.shilapi.xcertplay.hud.NavigationOutputs
 import com.shilapi.xcertplay.media.AndroidMediaSink
 import com.shilapi.xcertplay.orchestration.CarPlayController
 import java.util.concurrent.ExecutorService
@@ -50,9 +51,12 @@ class EcarxClusterFirstFrameTest {
             `when`(panel.isShowing).thenReturn(true)
         }
         `when`(controller.activeAirPlaySession()).thenReturn(session)
+        `when`(surface.isValid).thenReturn(true)
         CarPlayBackgroundSession.store(controller, sink, 1920, 1080, Any(), display) {}
         CarPlayBackgroundSession.bindClusterOutput(app, controller) {}
         output = ReflectionHelpers.getField(CarPlayBackgroundSession, "clusterOutput")
+        NavigationOutputs.requestPresentation(app, true, "test display intent", fromSettings = true)
+        ReflectionHelpers.setStaticField(Class.forName("com.shilapi.xcertplay.hud.EcarxHudBridge"), "guidanceActive", true)
         idle()
     }
 
@@ -60,6 +64,7 @@ class EcarxClusterFirstFrameTest {
         CarPlayBackgroundSession.clear()
         idle()
         panels.close()
+        ReflectionHelpers.setStaticField(Class.forName("com.shilapi.xcertplay.hud.EcarxHudBridge"), "guidanceActive", false)
     }
 
     @Test fun routeAndSurfaceCannotBypassTheCurrentSessionsFirstMainFrame() {
@@ -135,6 +140,34 @@ class EcarxClusterFirstFrameTest {
         idle()
         verify(controller).clearClusterOutputStateListener(ReflectionHelpers.getField(output, "stateListener"))
         assertNull(ReflectionHelpers.getField(CarPlayBackgroundSession, "clusterOutput"))
+    }
+
+    @Test fun hidingAndRestoringThePanelUpdatesThePhonesSecondaryUi() {
+        open()
+        clearInvocations(controller)
+        output.onRouteRequested(false)
+        idle()
+        verify(controller, atLeastOnce()).setClusterOutputVisible(false)
+        verify(controller, never()).setClusterOutputVisible(true)
+        clearInvocations(controller)
+        output.onRouteRequested(true)
+        idle()
+        onSurface(surface)
+        verify(controller, atLeastOnce()).setClusterOutputVisible(true)
+    }
+
+    @Test fun theWindowWaitsForAValidSurfaceBeforeClaimingProjectionOrPhoneUi() {
+        `when`(session.hasRenderedMainFrame).thenReturn(true)
+        output.onRouteRequested(true)
+        idle()
+        assertEquals(1, panels.constructed().size)
+        verify(controller, never()).setClusterOutputVisible(true)
+        assertTrue(NavigationOutputs.diagnosticReport(app).contains("projectionWanted=false"))
+        onSurface(mock(Surface::class.java))
+        verify(controller, never()).setClusterOutputVisible(true)
+        onSurface(surface)
+        verify(controller, atLeastOnce()).setClusterOutputVisible(true)
+        assertTrue(NavigationOutputs.diagnosticReport(app).contains("projectionWanted=true"))
     }
 
     @Test fun staleControllerClearAndOldOutputCloseCannotReleaseReplacementOwner() {

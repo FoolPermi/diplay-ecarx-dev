@@ -72,11 +72,7 @@ object EcarxOutputSettings {
         }
     }
 
-    /**
-     * Last requested projection switch, shown by the settings row, not proof of a visible panel.
-     * The bridge writes both manual and route-driven requests and clears it at process startup.
-     * Keep this existing persistence behavior; it is not a separate user preference to restore.
-     */
+    /** Last explicit display choice from settings, the cluster controls or a fly-screen gesture. */
     fun presentationSwitch(context: Context): Boolean = prefs(context).getBoolean(KEY_PRESENTATION, false)
 
     internal fun setPresentationSwitch(context: Context, enabled: Boolean) {

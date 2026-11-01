@@ -64,7 +64,11 @@ internal class EcarxClusterSession(
             hide()
             return
         }
-        surface?.let { sink.setSurface(111, it) }
+        surface?.takeIf { it.isValid }?.let {
+            sink.setSurface(111, it)
+            val accepted = NavigationOutputs.requestPresentation(app, true, "cluster surface ready")
+            controller.setClusterOutputVisible(accepted)
+        }
         if (presentation != null) return
         val display = displays?.getDisplay(DISPLAY_ID) ?: return
         lateinit var panel: EcarxClusterPresentation
@@ -78,7 +82,6 @@ internal class EcarxClusterSession(
             if (presentation === panel) {
                 presentation = null
                 onSurface(null)
-                NavigationOutputs.requestPresentation(app, false, "cluster window dismissed")
                 log("Cluster panel: session window dismissed")
                 if (!closed && wanted) main.post(::apply)
             }
@@ -92,16 +95,14 @@ internal class EcarxClusterSession(
             log("Cluster panel: show failed ${error.message}")
             return
         }
-        // The window exists before enabling the platform's switch onto display1.
-        val accepted = NavigationOutputs.requestPresentation(app, true, "cluster stream")
-        log("Cluster panel: showing on \"${display.name}\" " +
-            "${display.mode.physicalWidth}x${display.mode.physicalHeight} projection=$accepted source=independent map session-owned")
+        log("Cluster panel: window created on \"${display.name}\" " +
+            "${display.mode.physicalWidth}x${display.mode.physicalHeight} awaitingSurface=${surface == null} source=independent map session-owned")
     }
 
     private fun hide() {
+        controller.setClusterOutputVisible(false)
         val panel = presentation ?: return
         presentation = null
-        NavigationOutputs.requestPresentation(app, false, "cluster stream")
         onSurface(null)
         runCatching { panel.dismiss() }
         log("Cluster panel: dismissed session-owned")
@@ -112,10 +113,13 @@ internal class EcarxClusterSession(
         if (previous === next) return
         if (previous != null) sink.clearSurface(111, previous)
         surface = next
-        if (next != null && !closed && wanted && controller.activeAirPlaySession()?.hasRenderedMainFrame == true) {
-            sink.setSurface(111, next)
+        if (next != null) {
+            apply()
+        } else {
+            controller.setClusterOutputVisible(false)
+            NavigationOutputs.requestPresentation(app, false, "cluster surface detached")
+            log("Cluster surface: detached ${diagnostics()}")
         }
-        if (next == null) log("Cluster surface: detached ${diagnostics()}")
     }
 
     fun close() {

@@ -394,7 +394,7 @@ class CarPlayController(
                 }
             }
             activeSession = session
-            NavigationOutputs.onSessionActive(debugLogs = { uiListener?.debugLogsEnabled == true }) { !closed && activeSession === session && !session.isClosed }
+            NavigationOutputs.onSessionActive(debugLogs = { uiListener?.debugLogsEnabled == true }, requestExit = ::requestNavigationExit) { !closed && activeSession === session && !session.isClosed }
             clusterOutputStateListener?.invoke()
             if (replacement) restoreDashboardContent(session)
             debugLog(
@@ -664,6 +664,16 @@ class CarPlayController(
         dashboardMapEpoch.incrementAndGet()
     }
 
+    /** Release the phone's secondary navigation view when the physical cluster is hidden. */
+    fun setClusterOutputVisible(visible: Boolean) {
+        if (closed) return
+        try {
+            touchExecutor.execute { if (!closed) applyClusterUi(visible) }
+        } catch (_: java.util.concurrent.RejectedExecutionException) {
+            // Closing the controller also closes the phone session.
+        }
+    }
+
     /** Immutable stream geometry retained when a new host adopts this background controller. */
     fun configuredClusterSize(): Pair<Int, Int>? = airPlayConfig.cluster?.let { it.widthPixels to it.heightPixels }
 
@@ -693,6 +703,19 @@ class CarPlayController(
             }
             true
         } catch (_: Exception) {
+            false
+        }
+    }
+
+    /** Queues navigation arbitration on the command worker; route metadata confirms completion. */
+    fun requestNavigationExit(): Boolean {
+        val session = activeAirPlaySession() ?: return false
+        return try {
+            touchExecutor.execute {
+                if (!closed && activeSession === session) session.requestNavigationExit()
+            }
+            true
+        } catch (_: java.util.concurrent.RejectedExecutionException) {
             false
         }
     }

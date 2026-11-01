@@ -186,9 +186,10 @@ internal object EcarxDimApi {
      * `INaviInteraction.registerNavigationInteractionCallback(INavigationInteractionCallback)` — the
      * navigation-scoped half of the same idea. The stock app registers both (same file, line 146).
      */
-    fun registerNavigationInteractionCallback(navi: Any, label: String): Any? =
+    fun registerNavigationInteractionCallback(navi: Any, label: String, onAction: ((Int) -> Unit)? = null): Any? =
         registerCallback(
             navi, EcarxCapabilities.NAVI_CALLBACK, "registerNavigationInteractionCallback", label, "navi",
+            onAction = onAction,
         )
 
     private fun registerCallback(
@@ -198,10 +199,11 @@ internal object EcarxDimApi {
         label: String,
         scope: String,
         onOption: ((Int) -> Unit)? = null,
+        onAction: ((Int) -> Unit)? = null,
     ): Any? {
         val itf = runCatching { Class.forName(interfaceName) }.getOrNull() ?: return null
         val proxy = runCatching {
-            Proxy.newProxyInstance(itf.classLoader, arrayOf(itf), DimCallbackHandler(label, scope, onOption))
+            Proxy.newProxyInstance(itf.classLoader, arrayOf(itf), DimCallbackHandler(label, scope, onOption, onAction))
         }.getOrElse {
             report("$scope callback proxy failed: ${describe(it)}")
             return null
@@ -766,6 +768,7 @@ internal object EcarxDimApi {
         private val label: String,
         private val scope: String,
         private val onOption: ((Int) -> Unit)?,
+        private val onAction: ((Int) -> Unit)?,
     ) : InvocationHandler {
         override fun invoke(proxy: Any, method: Method, args: Array<out Any?>?): Any? {
             when (method.name) {
@@ -773,9 +776,14 @@ internal object EcarxDimApi {
                 "hashCode" -> return System.identityHashCode(proxy)
                 "equals" -> return proxy === args?.firstOrNull()
             }
-            if (NavigationOutputs.debugLogsEnabled()) EcarxDimApi.report("callback $scope.$label ${method.name}(${java.util.Arrays.toString(args)})")
+            if (NavigationOutputs.debugLogsEnabled() || method.name == "onShowPresentationOptionChanged" ||
+                method.name == "onDoInteractionAction") {
+                EcarxDimApi.report("callback $scope.$label ${method.name}(${java.util.Arrays.toString(args)})")
+            }
             if (method.name == "onShowPresentationOptionChanged") {
                 (args?.singleOrNull() as? Int)?.let { onOption?.invoke(it) }
+            } else if (method.name == "onDoInteractionAction") {
+                (args?.firstOrNull() as? Int)?.let { onAction?.invoke(it) }
             }
             return EcarxDimApi.defaultValue(method.returnType)
         }

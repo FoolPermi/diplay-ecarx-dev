@@ -91,6 +91,44 @@ class ClusterContentTest {
         return RtspMessage.parseMessages(plaintext).messages.map { BplistCodec.decode(it.body) as Map<String, Any?> }
     }
 
+    @Test fun navigationExitClaimsThenReleasesTurnByTurnWithoutChangingDisplayContent() {
+        val session = session(CarPlayClusterDisplay.MAP_URL)
+        try {
+            setup(session)
+            val event = eventReady(session)
+            assertTrue(session.requestNavigationExit())
+            assertTrue(session.requestNavigationExit())
+            assertEquals(1, commands(event).size)
+            fun modes(entity: Int) {
+                val request = RtspMessage.Request("POST", "/command", "RTSP/1.0", emptyMap(),
+                    BplistCodec.encode(mapOf("type" to "modesChanged", "params" to mapOf(
+                        "appStates" to listOf(mapOf("appStateID" to 3, "entity" to entity))))))
+                session.javaClass.getDeclaredMethod("handleCommand", RtspMessage.Request::class.java)
+                    .apply { isAccessible = true }.invoke(session, request)
+            }
+            modes(1)
+            assertEquals(1, commands(event).size)
+            modes(2)
+            val sent = commands(event)
+            assertEquals(listOf("changeModes", "changeModes"), sent.map { it["type"] })
+            val states = sent.map { ((it["params"] as Map<*, *>)["appStates"] as List<*>).single() as Map<*, *> }
+            assertEquals(listOf(true, false), states.map { it["state"] })
+            assertTrue(states.all { it["appStateID"] == 3L && !it.containsKey("entity") })
+            assertEquals(CarPlayClusterDisplay.MAP_URL, session.clusterUrl())
+        } finally { session.close() }
+    }
+
+    @Test fun navigationExitWithoutAnAcknowledgmentReleasesOnTimeout() {
+        val session = session(CarPlayClusterDisplay.MAP_URL)
+        try {
+            val event = eventReady(session)
+            assertTrue(session.requestNavigationExit())
+            val deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(7)
+            while (commands(event).size < 2 && System.nanoTime() < deadline) Thread.sleep(20)
+            assertEquals(2, commands(event).size)
+        } finally { session.close() }
+    }
+
     @Test fun aSuccessfulSwitchPublishesTheDeliveredUrlAndInvalidatesTheOldRoute() {
         val session = session(CarPlayClusterDisplay.Content.TURN_CARD.url)
         try {

@@ -7,6 +7,8 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
+import android.widget.Toast
+import com.shilapi.xcertplay.shared.R
 import com.shilapi.xcertplay.iap2.message.Iap2LaneGuidance
 import com.shilapi.xcertplay.iap2.wire.Iap2Frame
 import java.util.concurrent.Executors
@@ -192,13 +194,7 @@ internal object EcarxHudBridge {
     private var lastArrowChannel: String? = null
     private var ticksSincePush = 0
     private var presentationOption = 0 // Unknown until DIM sends its first callback.
-    private val platformAllowsProjection: Boolean
-        get() = when (presentationOption) {
-            1 -> guidanceActive // SHOW_PRESENTATION_NAVI_ROUTE
-            3 -> false          // SHOW_PRESENTATION_NEVER
-            else -> true        // SHOW_PRESENTATION_ALWAYS or no callback yet
-        }
-    private var routePanelWanted = false
+    private var clusterVisibleWanted = false
     private var guidanceActive = false
     private var lastGuidanceEnd = "none"
 
@@ -213,7 +209,7 @@ internal object EcarxHudBridge {
 
     fun setClusterPanelOwner(owner: ((Boolean) -> Unit)?) = synchronized(lock) {
         clusterPresentationRequested = owner
-        owner?.invoke(routePanelWanted && platformAllowsProjection)
+        owner?.invoke(guidanceActive && clusterVisibleWanted)
     }
 
     fun clearClusterPanelOwner(expected: (Boolean) -> Unit) = synchronized(lock) {
@@ -252,11 +248,10 @@ internal object EcarxHudBridge {
             report("ECARX identity absent, output disabled: ${EcarxCapabilities.describe(app)}")
             return@synchronized
         }
-        // Read the previous request for the startup reset below, not to restore a mirror.
-        presentationWanted = EcarxOutputSettings.presentationSwitch(app)
+        clusterVisibleWanted = EcarxOutputSettings.presentationSwitch(app)
         val pending = EcarxOutputSettings.presentationReleasePending(app)
-        releaseStalePresentation = presentationWanted || pending
-        startupReleaseOrigin = if (pending) "pending" else if (presentationWanted) "legacy" else "none"
+        releaseStalePresentation = pending
+        startupReleaseOrigin = if (pending) "pending" else "none"
         startupReleaseAttempts = 0
         startupReleaseCountdown = 0
         // Preserve legacy residue before clearing the old request, including across another restart.
@@ -268,16 +263,8 @@ internal object EcarxHudBridge {
                 "dimCb=${dimCallback != null} naviCb=${naviCallback != null} " +
                 "projection=$presentationWanted ${EcarxCapabilities.describe(app)}",
         )
-        // ★ Nothing is restored here any more (fix37). The switch now means "this panel shows what
-        // is on display 1", and at app start nothing of ours is on display 1 — restoring it painted
-        // the platform's mirror of the centre screen on the cluster with no route running, over a
-        // window that did not exist. A route arms it (see [clusterPresentationRequested]) and the
-        // end of a route releases it; the saved value is only brought back in line here.
-        if (presentationWanted) {
-            presentationWanted = false
-            EcarxOutputSettings.setPresentationSwitch(app, false)
-            report("projection not restored at start-up; the cluster panel is route-driven")
-        }
+        // Restore only the user's intent. The window owner enables projection after its Surface exists.
+        report("cluster visibility restored wanted=$clusterVisibleWanted platformOption=unknown")
         startTickerLocked()
     }
 
@@ -348,20 +335,22 @@ internal object EcarxHudBridge {
                 // Return to DIM before touching the bridge or its window owner.
                 main.post {
                     synchronized(lock) {
-                        if (option !in 1..3 || option == presentationOption) return@synchronized
-                        val wasAllowed = platformAllowsProjection
+                        if (option !in 1..3) return@synchronized
                         presentationOption = option
-                        if (platformAllowsProjection != wasAllowed) {
-                            presentationCountdown = 0
-                            if (routePanelWanted) clusterPresentationRequested?.invoke(platformAllowsProjection)
-                        }
+                        setVisibilityIntent(option != 3, "platform option=$option")
                     }
                 }
             }
         }
         val naviRef = navi
         if (naviRef != null && naviCallback == null) {
-            naviCallback = EcarxDimApi.registerNavigationInteractionCallback(naviRef, "diplay")
+            naviCallback = EcarxDimApi.registerNavigationInteractionCallback(naviRef, "diplay") { action ->
+                if (action == 2) Handler(Looper.getMainLooper()).post {
+                    val queued = NavigationOutputs.requestNavigationExit?.invoke() == true
+                    report("navigation exit requested action=2 queued=$queued awaitingPhoneRouteEnd=true")
+                    if (!queued) Toast.makeText(app, R.string.carapp_navigation_exit_unavailable, Toast.LENGTH_LONG).show()
+                }
+            }
         }
         // The handles stay null until the cluster service is up, so "the navigation half just
         // appeared" is a state change worth a line of its own: it is the difference between a head
@@ -469,48 +458,31 @@ internal object EcarxHudBridge {
 
     // ---------------------------------------------------------------- OEM switches
 
-    /**
-     * The 仪表投屏 switch — mirrors the **centre screen as it is at that moment** onto the cluster.
-     *
-     * The call is `setPresentationToDimSwitch(1, "", "", show)`: what both shipped ECARX apps send,
-     * and the only form measured working on the car. The two package strings stay empty because the platform
-     * ignores them — every named variant (`com.autonavi.amapauto`, this app's own package) produced
-     * the same picture on the car.
-     *
-     * Two things are measured now rather than assumed:
-     *  * what gets mirrored is **whatever the centre screen is showing when the call lands**. Opening
-     *    this switch from the settings screen puts the settings screen on the cluster, which is
-     *    exactly what the driver reported as "the whole picture moved over" (10-24 14:32: the switch
-     *    was on for 27 s and the driver never left this page);
-     *  * the platform answers immediately, in the other direction: `true` makes it publish
-     *    `firstFrameReady` on `ihu/events/navigation/ongoing` within 1 ms, `false` makes it publish
-     *    `naviAppOff` within 3 ms. Those two events are the **reply**, not the input — which is why
-     *    this project no longer publishes anything on that topic.
-     *
-     * Turning it on records the intent and arms the watch; turning it off releases once. Besides the
-     * settings screen, the other caller is the panel's owner: it creates its window first, then
-     * enables projection (fix37, see [clusterPresentationRequested]). Both callers use this same
-     * saved request and retry state; neither owns a separate projection preference.
-     *
-     * It does **not** report whether the cluster changed, because nothing can: the platform call is
-     * `void`, unchecked, and returns the same thing whether or not the cluster is even powered.
-     * [EcarxResult.ok] when enabling means "the watch owns delivery now", even if a DIM handle is
-     * not ready. Disabling returns the immediate platform result but always clears the request.
-     */
-    fun applyPresentation(show: Boolean, origin: String, fromSettings: Boolean): EcarxDimApi.EcarxResult = synchronized(lock) {
+    /** Settings and OEM controls change one persisted intent, independently of route liveness. */
+    fun setVisibilityIntent(show: Boolean, origin: String): EcarxDimApi.EcarxResult = synchronized(lock) {
+        val app = context ?: return EcarxDimApi.EcarxResult.failed("DIM not initialized")
+        clusterVisibleWanted = show
+        EcarxOutputSettings.setPresentationSwitch(app, show)
+        val effective = show && guidanceActive
+        report("cluster visibility intent show=$show origin=$origin routeActive=$guidanceActive panel=$effective")
+        // Repeating an explicit event must also repair a missing or stale window.
+        clusterPresentationRequested?.invoke(effective)
+        EcarxDimApi.EcarxResult.ok("cluster display intent saved")
+    }
+
+    /** Runtime delivery belongs only to the independent window, never to a settings toggle. */
+    fun applyPresentation(show: Boolean, origin: String): EcarxDimApi.EcarxResult = synchronized(lock) {
         // Who asked. The 18:24 report shows the mirror being turned *off* half a second after the
         // process started, while the settings screen held "on" — and nothing in this file can tell
         // the difference between the driver, a dialog that cancelled itself, and a switch the
         // settings screen rebuilt. This line is what separates them next time.
         report("presentation request show=$show origin=$origin")
-        val app = context ?: return EcarxDimApi.EcarxResult.failed("DIM not initialized")
-        // A current manual or route request supersedes startup recovery under the same lock.
+        if (context == null) return EcarxDimApi.EcarxResult.failed("DIM not initialized")
+        // A current window request supersedes startup recovery under the same lock.
         releaseStalePresentation = false
-        if (fromSettings && guidanceActive) {
-            routePanelWanted = show
-            clusterPresentationRequested?.invoke(show && platformAllowsProjection)
+        if (show && (!clusterVisibleWanted || !guidanceActive)) {
+            return EcarxDimApi.EcarxResult.failed("cluster display not requested")
         }
-        EcarxOutputSettings.setPresentationSwitch(app, show)
         presentationWanted = show
         if (!show) {
             presentationAttempts = 0
@@ -520,7 +492,7 @@ internal object EcarxHudBridge {
             return result
         }
         if (!ecarxDetected) return EcarxDimApi.EcarxResult.failed("ECARX head unit not detected")
-        if (platformAllowsProjection) requestPresentationLocked()
+        requestPresentationLocked()
         EcarxDimApi.EcarxResult.ok("projection watch armed")
     }
 
@@ -614,7 +586,7 @@ internal object EcarxHudBridge {
      * switch keeps projection alive while the latest platform option allows it.
      */
     private fun watchProjectionLocked() {
-        if (!presentationWanted || !platformAllowsProjection) return
+        if (!presentationWanted || !clusterVisibleWanted || !guidanceActive) return
         if (presentationCountdown > 0) {
             presentationCountdown -= 1
             return
@@ -729,8 +701,7 @@ internal object EcarxHudBridge {
             // stream instead of a scaled-down copy of the centre screen. Fired here and not from
             // the ticker so it lands with the first guidance frame, before the platform's mirror
             // has had time to paint a wrong-ratio picture on the same panel.
-            routePanelWanted = true
-            clusterPresentationRequested?.invoke(platformAllowsProjection)
+            clusterPresentationRequested?.invoke(clusterVisibleWanted)
         }
     }
 
@@ -845,7 +816,6 @@ internal object EcarxHudBridge {
                 report("DIM guidance ended $lastGuidanceEnd")
                 // Hand the panel back: the presentation stops requesting the cluster stream, so the
                 // head unit's own instrument page returns instead of a frozen last map frame.
-                routePanelWanted = false
                 clusterPresentationRequested?.invoke(false)
             }
         } finally {
@@ -1160,6 +1130,8 @@ internal object EcarxHudBridge {
             // whether the cluster is being fed the stock app's SVG channel or a fallback.
             append(" arrow=").append(EcarxDimApi.arrowOverloads(navi))
             append(" projectionWanted=").append(presentationWanted)
+            append(" displayIntent=").append(clusterVisibleWanted)
+            append(" lastPlatformOption=").append(presentationOption)
             append(" releasePending=").append(EcarxOutputSettings.presentationReleasePending(context))
             append(" startupReleaseActive=").append(releaseStalePresentation)
             append(" startupReleaseOrigin=").append(startupReleaseOrigin)

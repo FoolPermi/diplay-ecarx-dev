@@ -852,8 +852,8 @@
     <string name="settings_hotspot_interface_description">僅用於把熱點放在 Android 不認為是 Wi-Fi 熱點的網路介面上的車機，例如部分吉利、領克及其它高通車機上的 eth0.3。留空則自動尋找。</string>
     <string name="ecarx_cluster_call_rejected">車機拒絕了這次呼叫：需要系統簽章且已授予 DIM 權限。</string>
     <string name="ecarx_cluster_mirror_confirm">開啟後會把整個中央螢幕鏡像到儀表，並蓋住儀表上的導航箭頭與媒體卡片。\n\n確定要開啟嗎？</string>
-    <string name="ecarx_instrument_cluster_projection">整屏鏡像到儀表</string>
-    <string name="ecarx_instrument_cluster_projection_description">把中控畫面整屏鏡像到儀表，會蓋住儀表導航和媒體卡片。只使用箭頭、車道或歌曲資訊時請保持關閉。</string>
+    <string name="ecarx_instrument_cluster_projection">在儀表顯示導航地圖</string>
+    <string name="ecarx_instrument_cluster_projection_description">導航時顯示獨立的 CarPlay 儀表地圖。關閉只隱藏儀表地圖，手機導航繼續執行。立即生效。</string>
     <string name="ecarx_media_on_instrument_cluster">儀表媒體卡片</string>
     <string name="ecarx_media_on_instrument_cluster_description">透過億咖通 ECARX MediaCenter 輸出媒體資訊，與導航獨立，需要相容韌體及權限。</string>
     <string name="ecarx_navigation">億咖通導航</string>

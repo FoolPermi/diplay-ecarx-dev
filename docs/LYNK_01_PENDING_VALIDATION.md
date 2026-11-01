@@ -157,3 +157,80 @@ UI 截图采用当前车机的 1920×1080 横屏及正常字体。
 source-only Debug 包没有认证身份时只能检查安装、设置界面及独立的系统热点/OTG 枚举，
 不能用于证明本应用已完成 CarPlay 握手。端到端验证需满足既有认证前置条件。
 普通 Android 手机不能替代 ECARX 方控、DIM、麦克风硬件路由或车机蓝牙时序的验收。
+
+## 2026-11-01 v110 实车：统一仪表显隐与方控退出导航
+
+用户已要求委托 Subagent 实施以下修复。基线为 `dev` 的 `bb3cde43` 加工作区 v110 改动；
+v110 已覆盖安装，不能回退或覆盖这些未提交改动。早期车道补丁已包含在更新后的 dev 中，原始 stash 和补丁备份仍保留。
+
+### 已确认的现场证据
+
+- v110 将窗口隐藏接到仪表屏 `ALT_UUID` 的 `stopUI`，有效 Surface 恢复接到 `showUI` 与关键帧请求；不拆视频流、不结束路线。
+- 19:32:42 至 19:34:58，17 个三指请求中 15 次实际状态变化均对应手机命令与窗口显隐；两次重复显示正常去重。
+- 19:34:58.704 三指隐藏，58.788 写出 `stopUI`，58.857 窗口关闭。19:35:24.204 从设置退出应用，旧进程死亡后重启；19:35:48.485 无新显示手势却再次 `showUI`。
+- `presentationOption` 只在内存中保存，初值未知却默认允许显示；新路线激活又将 `routePanelWanted` 置 true。上述重启后自动重开有实测与源码双重依据。
+- 设置关闭会将 `routePanelWanted=false`；随后三指显示可能被此门控或相同 option 去重挡住。反方向，系统 option=3 时设置打开会保存 on，但窗口仍被策略挡住。此项为源码确认，本轮没有设置来源日志，不能宣称每种组合已实车复现。
+- 设置打开在允许投屏时可能先开启平台投屏，再异步创建独立窗口；需避免这个顺序带来的中控镜像空窗，持续镜像的唯一原因尚未确认。
+- 本轮缺少逐次原始 option 回调日志。命令写出、Surface 存在都不等于物理屏显示正确或中控导航详情已回切。
+
+### 实施要求
+
+1. 设置、三指与方控显隐更新同一个用户显示意图；路线是否活跃独立维护。最终窗口、平台投屏与手机副屏命令由同一现有所有者协调，避免各入口反写不同状态。
+2. 重启保留最后明确的显示意图，未知平台策略不得直接当作允许。相同 option 的回调也应能修正已经错位的本地窗口状态。
+3. 显示时先准备独立仪表窗口/Surface，再开启平台输出与手机副屏；隐藏时通知手机释放副屏并关闭独立输出。仪表显示详情、中控显示全览；仪表隐藏后详情回到中控的实际行为仍需现场观察。
+4. 方控 `onDoInteractionAction(2, null)` 已多次收到。原厂 753 插件 `NaviDashboardManager.NavigationInteractionCallback` 的 case 2 明确调用 `stopNavi()`。它是退出路线请求，不是显示/隐藏。
+5. 退出导航须接通到手机的真实结束路线操作，并用 iAP2 `0x5201` 的路线结束状态确认后清理仪表与车道。不能用 `stopUI`、停止订阅、仅清空仪表或未经证实的命令冒充退出成功。当前 v110 仅记录此导航交互回调，尚未找到并验证手机结束路线的命令；实施者须调查现有协议和可核实的参考实现，保留明确的失败结果与证据。
+6. 用户已要求简化测试、尽快车测：优先覆盖上述状态组合、进程重建、重复事件和退出确认的针对性回归，不继续扩大完整测试排障。v110 新增两套共 25 项回归通过；完整 common 检查有一项 Robolectric 本机资源路径失败，后续完整复测按用户要求中止，不能记为完整 CI 通过。
+7. 音乐播放后自动暂停另有日志证据：CarPlay PLAY 送出后，仍连接的车机 A2DP 服务发送 AVRCP PAUSE；蓝牙让位报告恢复未完成。此次不将音乐修改混入仪表与退出导航修复。
+
+### 本地证据位置
+
+工作区 `logs/cap-v109-20261101-session1/` 为跨 v109/v110 的连续采集；以 `V110_INSTALL_SUCCESS` 和进程 PID 区分版本，目录名不代表全部是 v109。
+详细分析在 `v110-switch-analysis/RESULT.txt`，事件和配对在同目录 `events.log`、`events.json`、`gesture-command-pairs.json`、`restart-evidence.log`。
+方控及早期切换结论在 `cluster-control-chain.txt`；音乐问题在 `music-wheel-findings.txt`。
+v110 APK、签名、构建安装结果及源码补丁在工作区 `artifacts/cluster-ui-v110-20261101/`。
+日志含位置、设备和媒体信息，仅作本地工程证据，不直接发布或插入分享版文档。
+
+### v111 本地实施结果（尚未安装）
+
+- 设置和 OEM 显隐/三指回调现在写入同一持久化显示意图；路线活跃状态独立维护。重复 option 仍通知窗口 owner，设置关闭后可由三指显示重新覆盖，最后一次明确选择跨进程保留。没有保存选择且系统 option 未知时不自动打开。
+- 窗口与 Surface 的创建/销毁只更新运行时输出，不再反写用户开关。显示由有效 Surface 驱动：绑定独立 111 流后才开启平台输出并发送 `showUI`；隐藏发送 `stopUI` 并释放窗口。设置入口不再直接开启中控镜像，现有设置文案改为“在仪表显示导航地图”，并同步三指改变后的保存值。
+- 已接入导航交互 `onDoInteractionAction(2, null)`。**手机终止路线仍不支持**：当前只记录明确的 `result=unsupported` 并提示用户在 CarPlay/iPhone 结束路线，不发送猜测命令，不清空仪表冒充成功。真正收到 NoRoute/Arrived 后仍走原有结束清理。
+- 协议调查范围包含当前 AirPlay/iAP2、上游本地副本、CarUp 参考实现和 Context7 的 OpenAutoLink 资料。`0x5203 StopRouteGuidanceUpdates` 是停止元数据订阅，不能当作结束路线；原厂 `stopNavi()` 调用的是本机地图代理。未找到可验证的 iPhone 结束路线操作，不能由此断言整个私有协议绝无此能力。参考：[OpenAutoLink 的路线元数据链路](https://github.com/mossyhub/openautolink/blob/main/docs/reference/gminfo/projection/cluster_navigation.md)。
+- 针对性测试 63 项全部通过：`EcarxLaneGuidanceFlowTest` 37、`EcarxClusterFirstFrameTest` 9、`DashboardContentDeliveryTest` 17，覆盖状态组合、重复事件、隐藏后重建、窗口与 Surface 顺序、副屏命令，以及退出请求不误清路线。未重跑完整 CI。
+- 本地签名 release 构建通过，versionCode=111，versionName=`0.2-car-test-20261101-cluster-intent-v111`，签名与 v110/v109 相同。APK、源码补丁、测试 XML 和日志在工作区父目录 `artifacts/cluster-visibility-v111-20261101/`。用户已结束本轮现场采集，**没有安装此包或再次操作车机**，仪表视觉效果与中控详情回切待下轮验证。未提交/推送源码。
+
+### 小米 8 取消导航通路验证（2026-11-01，未验证实车仪表）
+
+用户授权在小米 8 安装调试包，只跑修改部分的定向测试。当前测试包为 v111 Debug navigation-exit-probe。
+采用 Apple WWDC16 Part 2 所述 TurnByTurn 仲裁，changeModes 发送 appStates=[{appStateID:3,state:true}]，
+收到 modesChanged 的 entity=2 后发送 state=false 释放；无回报时五秒后释放。state 为布尔，entity 为归属值。
+普通路线清理仍等待手机 0x5201 NoRoute/Arrived，未用停止订阅或清屏模拟结束。
+
+第一次测试触发 NetworkOnMainThreadException，发送器关闭连接，手机重连但路线未结束。
+已将触发改到现有 touchExecutor，超时释放改到后台定时器，并增加线程回归测试。
+第二次 20:25:17.076 请求写出，.086 收到 entity=2，.091 释放写出，
+.099 收到 0x5201（raw-body=00 06 00 00 00 2a 00 05 00 01 00，状态0），.101 收到 entity=0。
+用户确认“已退出导航，没有重连”。本次只证明该手机/地图会话可通过仲裁结束路线。
+原车 action=2 已接同一入口，仪表结束状态回写及确认框解除仍待车测，未触碰车机。
+
+定向测试通过 ClusterContentTest 12 项、EcarxLaneGuidanceFlowTest 37 项，
+另有 DashboardContentDeliveryTest 新增后台写出回归1项通过。仅构建 Debug APK，没有全量测试。
+原工作区 Kotlin 增量编译出现已有顶层函数引用错误，关闭增量编译后构建通过。
+日志保存在父工作区 logs/navigation-exit-mi8-20261101/probe.log；本次采集已停止。未提交或推送。
+参考 https://developer.apple.com/videos/play/wwdc2016/723/ 及 catplay-labs/catplay 的 modes 类型定义。
+
+### 两项修复的仓库收口
+
+显隐统一与退出通路合并保留于当前工作树。设置、OEM/三指事件写同一显示意图，
+窗口/Surface只交付运行状态，隐藏跨进程保留；平台输出与手机副屏在Surface有效后启用。
+仪表action=2接入当前会话的后台命令队列，TurnByTurn仲裁及五秒超时释放由会话持有。
+手机0x5201结束状态到达后才回写原车idle/Stopped、清车道并收起窗口，用户显隐选择仍保留。
+补充回归覆盖“收到退出动作、手机未结束时不清路线、收到NoRoute后才结束输出”的完整顺序。
+小米8实测使用的临时Activity调试Action已从交付源码移除，正式入口保留为原车action=2。
+原车确认框消失及双屏布局仍未实车验收，不将手机测试视作原车验收。不自动提交/推送。
+最终定向验证通过77项，0失败/0跳过：EcarxLaneGuidanceFlow 38、ClusterContent 12、EcarxClusterFirstFrame 9、DashboardContentDelivery 18。未执行全量CI。
+
+v112 平台签名 Release 构建通过，versionCode=112，versionName=0.2-car-test-20261101-cluster-exit-v112。
+APK与签名/校验值在父目录 artifacts/cluster-exit-v112-20261101/。签名沿用c8a2e9bc…1192ab8。
+本次只构建并核对包，未安装此Release包、未操作车机；原车仪表视觉验收仍待进行。

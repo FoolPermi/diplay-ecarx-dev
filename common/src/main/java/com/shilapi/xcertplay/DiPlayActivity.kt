@@ -269,9 +269,19 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
         connect(notificationTransport)
     }
+    private var clusterProjectionRow: Switch? = null
+    private var syncingClusterVisibility = false
     private val tick = object : Runnable {
         override fun run() {
             refreshStatus()
+            clusterProjectionRow?.let { row ->
+                val saved = EcarxOutputSettings.presentationSwitch(this@DiPlayActivity)
+                if (row.isChecked != saved) {
+                    syncingClusterVisibility = true
+                    row.isChecked = saved
+                    syncingClusterVisibility = false
+                }
+            }
             if (CarHotspotSettings.enabled(this@DiPlayActivity) &&
                 (page == "home" || page == "connection" || page == "setup")) {
                 val ready = CarHotspotSetup.networkReady(this@DiPlayActivity)
@@ -4012,16 +4022,10 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             EcarxOutputSettings.setLaneGuidanceEnabled(this, it)
             NavigationOutputs.ecarxChanged(this)
         }
-        // The 仪表投屏 switch mirrors the whole centre screen onto the cluster. It is not needed for
-        // the arrow or the media card — both go over the DIM channels — and turning it on covers
-        // exactly the cards this page configures, which is how it was mistaken for "the arrow
-        // stopped working". It asks before it takes effect, and the row is held so a cancel can put
-        // the switch back.
-        var projectionRow: Switch? = null
-        projectionRow = toggle(card, getString(R.string.ecarx_instrument_cluster_projection),
+        clusterProjectionRow = toggle(card, getString(R.string.ecarx_instrument_cluster_projection),
             getString(R.string.ecarx_instrument_cluster_projection_description),
             EcarxOutputSettings.presentationSwitch(this)) { on ->
-            if (on) confirmClusterMirror(projectionRow) else applyClusterMirror(false)
+            if (!syncingClusterVisibility) applyClusterVisibility(on)
         }
         lateinit var safeAreaButton: Button
         safeAreaButton = button(getString(R.string.settings_ecarx_cluster_safe_area) + VALUE_SEPARATOR +
@@ -4111,39 +4115,8 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
      * numbers `DiPlayActivity`'s lambda classes by their position in this file — one more lambda
      * anywhere in here renames every later one and trips the class-set regression check.
      */
-    /** Asks before the mirror goes up, because it is the one switch that hides the other outputs. */
-    /** Why the mirror dialog closed without a confirmation; cleared once it has been reported. */
-    private var clusterMirrorCancelReason: String? = null
-    private fun confirmClusterMirror(row: Switch?) {
-        AlertDialog.Builder(this)
-            .setTitle(R.string.ecarx_instrument_cluster_projection)
-            .setMessage(R.string.ecarx_cluster_mirror_confirm)
-            .setPositiveButton(android.R.string.ok) { _, _ -> applyClusterMirror(true) }
-            .setNegativeButton(android.R.string.cancel) { _, _ ->
-                // Both buttons land in applyClusterMirror(false) through the switch listener, so the
-                // reason has to be carried across; without it a cancelled dialog is indistinguishable
-                // from the driver turning the switch off.
-                clusterMirrorCancelReason = "dialog-negative"
-                row?.isChecked = false
-            }
-            .setOnCancelListener {
-                clusterMirrorCancelReason = "dialog-cancel"
-                row?.isChecked = false
-            }
-            .show()
-    }
-
-    private fun applyClusterMirror(show: Boolean) {
-        // requestPresentation records the intent and arms the retry watch. It only reports a failure
-        // when the head unit has no DIM interface at all: the platform call is `void` and unchecked,
-        // so nothing can tell us whether the cluster — which is only powered once the engine runs —
-        // actually took the mirror.
-        //
-        // The origin goes into the session report. One drive showed the mirror switched off half a
-        // second after the process started, with the settings screen still reading "on"; that line
-        // is the only thing that says whether the driver, a cancelled dialog or a rebuilt switch did it.
-        val origin = clusterMirrorCancelReason ?: if (show) "settings-on" else "settings-off"
-        clusterMirrorCancelReason = null
+    private fun applyClusterVisibility(show: Boolean) {
+        val origin = if (show) "settings-on" else "settings-off"
         if (!NavigationOutputs.requestPresentation(this, show, origin, fromSettings = true)) {
             toast(getString(R.string.ecarx_cluster_call_rejected))
         }

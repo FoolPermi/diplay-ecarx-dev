@@ -65,7 +65,7 @@ class DashboardContentDeliveryTest {
 
     private class EventSocket(private val onWrite: (() -> Unit)? = null) : Socket() {
         var writes = 0
-        private val bytes = ByteArrayOutputStream()
+        val bytes = ByteArrayOutputStream()
         override fun getOutputStream(): OutputStream = object : OutputStream() {
             override fun write(value: Int) { bytes.write(value) }
             override fun write(data: ByteArray, offset: Int, length: Int) {
@@ -102,6 +102,20 @@ class DashboardContentDeliveryTest {
         return release
     }
 
+    @Test fun navigationExitFromTheUiWritesOnTheCommandWorker() {
+        Fixture().use { f ->
+            val phone = f.phone()
+            val writeThread = AtomicReference<Thread>()
+            val event = eventReady(phone, EventSocket { writeThread.set(Thread.currentThread()) })
+            f.activate(phone)
+            assertTrue(f.controller.requestNavigationExit())
+            f.awaitCommands()
+            assertNotNull(writeThread.get())
+            assertNotSame(Thread.currentThread(), writeThread.get())
+            assertEquals(1, event.writes)
+        }
+    }
+
     @Test fun aMissingPhoneOrClusterReportsFailureImmediately() {
         Fixture().use { f ->
             val withoutPhone = Completion()
@@ -111,6 +125,29 @@ class DashboardContentDeliveryTest {
             val withoutCluster = Completion()
             f.controller.showDashboardContent(CarPlayClusterDisplay.MAP_URL, withoutCluster::accept)
             assertFalse(withoutCluster.await())
+        }
+    }
+
+    @Test fun physicalClusterVisibilityStopsAndRestoresOnlyTheSecondaryUi() {
+        Fixture().use { f ->
+            val phone = f.phone()
+            val event = eventReady(phone)
+            f.activate(phone)
+            val stream = phone.clusterStream
+            f.controller.setClusterOutputVisible(false)
+            f.controller.setClusterOutputVisible(false)
+            f.awaitCommands()
+            assertEquals(1, event.writes)
+            assertEquals(stream, phone.clusterStream)
+            f.controller.setClusterOutputVisible(true)
+            f.controller.setClusterOutputVisible(true)
+            f.awaitCommands()
+            val plaintext = ControlCipher(ByteArray(32), ByteArray(32)).decrypt(event.bytes.toByteArray()).data
+            val commands = RtspMessage.parseMessages(plaintext).messages.map { BplistCodec.decode(it.body) as Map<*, *> }
+            assertEquals(listOf("stopUI", "showUI", "forceKeyFrame"), commands.map { it["type"] })
+            assertTrue(commands.all { (it["params"] as Map<*, *>)["uuid"] == AirPlayInfoPlist.ALT_UUID })
+            assertEquals(stream, phone.clusterStream)
+            assertEquals(CarPlayClusterDisplay.Content.TURN_CARD.url, phone.clusterUrl())
         }
     }
 

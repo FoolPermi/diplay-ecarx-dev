@@ -126,6 +126,11 @@ class AirPlaySession(
     private var keepAliveSocket: DatagramSocket? = null
     private var keepAliveThread: Thread? = null
     private val eventWriteLock = Any()
+    private val navigationExitTimer = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { task ->
+        Thread(task, "carplay-navigation-exit").apply { isDaemon = true }
+    }
+    private var navigationExitPending = false
+    private var navigationExitTimeout: java.util.concurrent.ScheduledFuture<*>? = null
     private val eventThreads = CopyOnWriteArrayList<Thread>()
 
     val host: String = socket.inetAddress?.hostAddress ?: ""
@@ -166,6 +171,7 @@ class AirPlaySession(
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
+        navigationExitTimer.shutdownNow()
         mainScreenToken = null
         clearClusterContent()
         safeClose(socket)
@@ -405,6 +411,36 @@ class AirPlaySession(
     fun invokeSiri() {
         sendCommand(linkedMapOf("type" to "requestSiri", "params" to linkedMapOf("siriAction" to 2)))
         sendCommand(linkedMapOf("type" to "requestSiri", "params" to linkedMapOf("siriAction" to 3)))
+    }
+
+    /**
+     * TurnByTurn arbitration requests that the phone yield navigation, then releases our claim.
+     * Only the phone's subsequent route metadata can confirm that its route actually ended.
+     */
+    fun requestNavigationExit(): Boolean = synchronized(eventWriteLock) {
+        if (closed.get()) return false
+        if (navigationExitPending) return true
+        navigationExitPending = true
+        val sent = sendCommandLocked(mapOf("type" to "changeModes", "params" to mapOf(
+            "appStates" to listOf(mapOf("appStateID" to 3, "state" to true)),
+            "reasonStr" to "User requested navigation exit",
+        )))
+        navigationExitPending = sent
+        Log.i(TAG, "navigation exit claim written=$sent")
+        if (sent) navigationExitTimeout = navigationExitTimer.schedule(
+            { releaseNavigationExit("timeout") }, 5, java.util.concurrent.TimeUnit.SECONDS)
+        sent
+    }
+
+    private fun releaseNavigationExit(reason: String): Unit = synchronized(eventWriteLock) {
+        if (!navigationExitPending) return@synchronized
+        navigationExitPending = false
+        navigationExitTimeout?.cancel(false)
+        val sent = !closed.get() && sendCommandLocked(mapOf("type" to "changeModes", "params" to mapOf(
+            "appStates" to listOf(mapOf("appStateID" to 3, "state" to false)),
+            "reasonStr" to "Navigation exit arbitration complete",
+        )))
+        Log.i(TAG, "navigation exit release reason=$reason written=$sent routeEndUnconfirmed=true")
     }
 
     fun sendIapMessage(data: ByteArray, timeoutMillis: Long = 0L): Boolean {
@@ -801,6 +837,15 @@ class AirPlaySession(
                 ?.let { listener.onRemoteControlMessage(this, streamId, it) }
             return RtspMessage.Response(status = 200)
         }
+        if (type == "modesChanged") {
+            val navigation = (params["appStates"] as? List<*>)?.filterIsInstance<Map<*, *>>()
+                ?.firstOrNull { (it["appStateID"] as? Number)?.toInt() == 3 }
+            val entity = (navigation?.get("entity") as? Number)?.toInt()
+            if (entity != null) {
+                Log.i(TAG, "navigation mode entity=$entity")
+                if (entity == 2) releaseNavigationExit("accessory-granted")
+            }
+        }
         when (type) {
             "duckAudio" -> media.onAudioDuck(this, true)
             "unduckAudio" -> media.onAudioDuck(this, false)
@@ -981,7 +1026,8 @@ class AirPlaySession(
                     debugLog(
                         "airplay event rx ${message.method} ${message.path} cseq=${message.headers["cseq"] ?: "-"} body=${message.body.size}",
                     )
-                    val response = RtspMessage.buildResponse(message, RtspMessage.Response(status = 200))
+                    val response = RtspMessage.buildResponse(message,
+                        if (message.path == "/command") handleCommand(message) else RtspMessage.Response(status = 200))
                     trace {
                         "airplay event rx headers=${message.headers} " +
                             "bodyHex=${message.body.toHex()}"

@@ -895,8 +895,8 @@
     <string name="ecarx_navigation">ECARX navigation</string>
     <string name="ecarx_navigation_on_instrument_cluster">Navigation on the instrument cluster</string>
     <string name="ecarx_navigation_on_instrument_cluster_description">Show CarPlay directions on the instrument cluster. During guidance, DiPlay pauses factory navigation. On 753 units, you may need to add the home screen navigation card again afterward.</string>
-    <string name="ecarx_instrument_cluster_projection">Mirror the full screen to the instrument cluster</string>
-    <string name="ecarx_instrument_cluster_projection_description">Mirror the centre screen onto the instrument cluster. This covers the cluster navigation and media cards. Leave it off to keep turn arrows, lane guidance and song information visible.</string>
+    <string name="ecarx_instrument_cluster_projection">Show navigation map on the instrument cluster</string>
+    <string name="ecarx_instrument_cluster_projection_description">Show the independent CarPlay map during navigation. Turning this off hides the cluster map while navigation continues. Applies immediately.</string>
     <string name="ecarx_cluster_call_rejected">The head unit refused that call. It needs the system signature and the DIM permissions to be granted.</string>
     <string name="ecarx_cluster_mirror_confirm">This mirrors the whole centre screen onto the instrument cluster and covers the navigation arrow and media card drawn there.\n\nTurn it on anyway?</string>
     <string name="ecarx_media_on_instrument_cluster">Cluster media card</string>
