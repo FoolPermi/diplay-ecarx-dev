@@ -394,7 +394,7 @@ class CarPlayController(
                 }
             }
             activeSession = session
-            NavigationOutputs.onSessionActive { !closed && activeSession === session && !session.isClosed }
+            NavigationOutputs.onSessionActive(debugLogs = { uiListener?.debugLogsEnabled == true }) { !closed && activeSession === session && !session.isClosed }
             clusterOutputStateListener?.invoke()
             if (replacement) restoreDashboardContent(session)
             debugLog(

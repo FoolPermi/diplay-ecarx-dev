@@ -160,6 +160,7 @@ class WheelKeyService : AccessibilityService() {
 
     /** One entry per press for the diagnostic report; it must never be in the way of the key itself. */
     private fun recordPress(event: KeyEvent, kept: Boolean) {
+        if (!AirPlayPersistence.loadDebugLogsEnabled(this)) return
         runCatching {
             val text = WheelKeyLog.writesText(event.keyCode) || runCatching { event.isPrintingKey }.getOrDefault(true)
             val detail = when {

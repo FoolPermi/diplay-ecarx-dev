@@ -103,6 +103,7 @@ class EcarxLaneGuidanceFlowTest {
         EcarxHudBridge.attachReport { reports += it }
         reports.clear()
         panelRequests.clear()
+        NavigationOutputs.debugLogsEnabled = { true }
     }
 
     @After fun cleanup() {
@@ -316,6 +317,23 @@ class EcarxLaneGuidanceFlowTest {
         assertFalse(panelRequests.last())
         repeat(25) { tick() }
         assertEquals(false, calls("setPresentationToDimSwitch").last().payload["show"])
+    }
+
+    @Test fun navigationDetailsFollowTheDebugSwitchWithoutStoppingOutput() {
+        initialize()
+        var debug = false
+        NavigationOutputs.debugLogsEnabled = { debug }
+        maneuver(); guidance()
+        assertTrue(calls("updateNavigationInfo").isNotEmpty())
+        assertFalse(reports.any { it.startsWith("DIM input") || it.startsWith("DIM publish") })
+        debug = true
+        guidance(distance = 200)
+        assertTrue(reports.any { it.startsWith("DIM input") })
+        assertTrue(reports.any { it.startsWith("DIM publish") })
+        reports.clear()
+        debug = false
+        guidance(distance = 100)
+        assertFalse(reports.any { it.startsWith("DIM input") || it.startsWith("DIM publish") })
     }
 
     @Test fun startupWithoutResidueDoesNotTouchProjection() {

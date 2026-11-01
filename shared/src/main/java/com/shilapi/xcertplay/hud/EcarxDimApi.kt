@@ -773,7 +773,7 @@ internal object EcarxDimApi {
                 "hashCode" -> return System.identityHashCode(proxy)
                 "equals" -> return proxy === args?.firstOrNull()
             }
-            EcarxDimApi.report("callback $scope.$label ${method.name}(${java.util.Arrays.toString(args)})")
+            if (NavigationOutputs.debugLogsEnabled()) EcarxDimApi.report("callback $scope.$label ${method.name}(${java.util.Arrays.toString(args)})")
             if (method.name == "onShowPresentationOptionChanged") {
                 (args?.singleOrNull() as? Int)?.let { onOption?.invoke(it) }
             }

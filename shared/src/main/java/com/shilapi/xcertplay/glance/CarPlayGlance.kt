@@ -55,7 +55,7 @@ object CarPlayGlance {
             // Lane guidance is a side channel: log it, hand it to whoever draws lanes, and leave
             // the route/now-playing state alone.
             val lanes = Iap2LaneGuidance.parse(frame.payload) ?: return
-            if (lanes != loggedLanes) {
+            if (debugLogsEnabled && lanes != loggedLanes) {
                 loggedLanes = lanes
                 android.util.Log.i(TAG, "0x5204 " + describeLanes(lanes, frame.payload))
             }

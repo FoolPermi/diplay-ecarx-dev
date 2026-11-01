@@ -42,6 +42,7 @@ class AudioClockTrimTest {
             .newInstance(AudioFormat(AudioCodecKind.LPCM, 48_000, 2, 96, "media"),
                 false, false, 0, 0, AudioFocusCoordinator(null, false, false),
                 0, 500, { message: String -> reports.add(message) }, false, null, false, false)
+        set("debugLogsEnabled", { true })
         set("track", track)
         set("mappedChannel", AudioChannel.MEDIA)
         set("playbackStarted", true)
@@ -70,6 +71,27 @@ class AudioClockTrimTest {
         type.getDeclaredMethod("logStatsIfDue", Boolean::class.javaPrimitiveType).apply { isAccessible = true }
             .invoke(renderer, true)
         assertTrue(reports.toString(), reports.any { it.startsWith("audio stats") && it.contains(" playbackRate=47280 ended=true") })
+    }
+
+    @Test fun periodicStatsFollowDebugWithoutDisablingClockTrim() {
+        var debug = false
+        set("debugLogsEnabled", { debug })
+        val logStats = type.getDeclaredMethod("logStatsIfDue", Boolean::class.javaPrimitiveType)
+            .apply { isAccessible = true }
+        write(28_800)
+        val received = get("packetsReceived") as java.util.concurrent.atomic.AtomicInteger
+        received.set(12)
+        logStats.invoke(renderer, true)
+        assertEquals(0, received.get())
+        assertTrue(reports.none { it.startsWith("audio stats") })
+        assertEquals(listOf(47_280), RateTrack.rates)
+        debug = true
+        logStats.invoke(renderer, true)
+        assertTrue(reports.any { it.startsWith("audio stats") })
+        reports.clear()
+        debug = false
+        logStats.invoke(renderer, true)
+        assertTrue(reports.none { it.startsWith("audio stats") })
     }
 
     @Test fun aTrackThatRefusesTheRateKeepsPlayingWithoutTheTrim() {

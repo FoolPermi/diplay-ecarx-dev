@@ -866,7 +866,7 @@ open class CarPlayHostActivity : ComponentActivity() {
                     currentSurfaceTexture = texture
                 }
             }
-            appendLog(if (existing === surface) "Texture surface reused" else "Texture surface created")
+            if (debugLogsEnabled) appendLog(if (existing === surface) "Texture surface reused" else "Texture surface created")
             attachSurface(surface)
             updateVideoLayout(width, height)
             scheduleDisplaySize(width, height)
@@ -881,7 +881,7 @@ open class CarPlayHostActivity : ComponentActivity() {
             if (currentSurfaceTexture !== texture) return true
             currentSurface?.let(videoSurfaceOwner::clear)
             currentSurfaceTexture = null
-            appendLog("Texture surface destroyed")
+            if (debugLogsEnabled) appendLog("Texture surface destroyed")
             return true
         }
 
@@ -893,7 +893,7 @@ open class CarPlayHostActivity : ComponentActivity() {
             if (isDestroyed || holder !== fallbackVideoView?.holder) return
             val surface = holder.surface
             videoSurfaceOwner.replace(surface, releaseOnDetach = false)
-            appendLog("SurfaceView video surface created valid=${surface.isValid}")
+            if (debugLogsEnabled) appendLog("SurfaceView video surface created valid=${surface.isValid}")
             attachSurface(surface)
             videoView?.let { updateVideoLayout(it.width, it.height) }
             showLastPicture()
@@ -923,7 +923,7 @@ open class CarPlayHostActivity : ComponentActivity() {
                 .map { owner -> owner.beginSurfaceDetach(surface, parkMain = smoothVideo && owner === live) }
             val confirmed = detaches.map { it.await() }.all { it }
             videoSurfaceOwner.clear(surface)
-            appendLog("SurfaceView video surface destroyed detachConfirmed=$confirmed")
+            if (debugLogsEnabled) appendLog("SurfaceView video surface destroyed detachConfirmed=$confirmed")
         }
     }
 
@@ -1463,7 +1463,7 @@ open class CarPlayHostActivity : ComponentActivity() {
             (AndroidTvInputMode.shouldUseKnobAsPrimaryInput(this) ||
                 CarPlayRemoteKeys.fromExternalController(event, AirPlayPersistence.loadExternalController(this))) &&
             CarPlayRemoteKeys.dispatch(event, controller)) {
-            if (event.repeatCount == 0) {
+            if (debugLogsEnabled && event.repeatCount == 0) {
                 Log.d(
                     TAG,
                     "remote key ${KeyEvent.keyCodeToString(event.keyCode)} action=${event.action}",
@@ -1569,7 +1569,7 @@ open class CarPlayHostActivity : ComponentActivity() {
                         press.isMedia -> ctrl?.sendMediaButton(press.mediaIndex!!) == true
                         else -> false
                     }
-                    appendLog("SWKey: ${press.action.prefKey} key=${event.keyCode} sent=$sent")
+                    if (debugLogsEnabled) appendLog("SWKey: ${press.action.prefKey} key=${event.keyCode} sent=$sent")
                 }
                 return true
             }
@@ -1628,7 +1628,7 @@ open class CarPlayHostActivity : ComponentActivity() {
             ecarxSwKeyHandle = com.shilapi.xcertplay.hud.EcarxSwKeyIntercept.register(context, object :
                 com.shilapi.xcertplay.hud.EcarxSwKeyIntercept.Listener {
                 override fun onKeyPressed(keyCode: Int): Boolean {
-                    appendLog("SWKey-CH[intercept] t=${System.currentTimeMillis()} key=$keyCode session=${activeAirPlaySession != null}")
+                    if (debugLogsEnabled) appendLog("SWKey-CH[intercept] t=${System.currentTimeMillis()} key=$keyCode session=${activeAirPlaySession != null}")
                     if (activeAirPlaySession == null || inCall(this@CarPlayHostActivity)) return false
                     if ((WheelZoomSettings.isSiriKeyCode(context, keyCode) ||
                             com.shilapi.xcertplay.airplay.EcarxSwKey.resolve(
@@ -1656,7 +1656,7 @@ open class CarPlayHostActivity : ComponentActivity() {
         logAssistantCandidates()
         // 4. Private call-key broadcast (ecarx.intent.action.ECARX_KEY_RCALL_EVENT).
         ecarxCallKeyReceiver = com.shilapi.xcertplay.hud.EcarxKeyBroadcasts.registerCall(this) {
-            appendLog("SWKey-CH[broadcast-call] t=${System.currentTimeMillis()} session=${activeAirPlaySession != null}")
+            if (debugLogsEnabled) appendLog("SWKey-CH[broadcast-call] t=${System.currentTimeMillis()} session=${activeAirPlaySession != null}")
             runOnUiThread {
                 handleEcarxWheelKey(com.shilapi.xcertplay.airplay.CarPlayMediaButton.ECARX_ANSWER_8003)
             }
@@ -1709,7 +1709,7 @@ open class CarPlayHostActivity : ComponentActivity() {
         // same Siri entry the factory voice key uses. It wins over a learnt swKey_* action for the same code.
         if (WheelZoomSettings.isSiriKeyCode(this, keyCode)) {
             val sent = CarPlayMediaSession.onExternalSiriKey(keyCode)
-            appendLog("SWKey: custom Siri key=$keyCode sent=$sent")
+            if (debugLogsEnabled) appendLog("SWKey: custom Siri key=$keyCode sent=$sent")
             return sent
         }
         val press = com.shilapi.xcertplay.airplay.EcarxSwKey.resolve(
@@ -1724,7 +1724,7 @@ open class CarPlayHostActivity : ComponentActivity() {
             press.isMedia -> ctrl?.sendMediaButton(press.mediaIndex!!) == true
             else -> false
         }
-        appendLog("SWKey: ${press.action.prefKey} key=$keyCode sent=$sent")
+        if (debugLogsEnabled) appendLog("SWKey: ${press.action.prefKey} key=$keyCode sent=$sent")
         return sent
     }
 
@@ -5136,7 +5136,9 @@ open class CarPlayHostActivity : ComponentActivity() {
         // logcat, so its lines are routed into the same session report the audio sink writes to.
         // Fully qualified on purpose: nothing else in this file needs the hud package.
         com.shilapi.xcertplay.hud.NavigationOutputs.attachReport(HudReportSink(diagnosticLog))
+        val debugContext = applicationContext
         return AndroidMediaSink(
+            debugLogsEnabled = { AirPlayPersistence.loadDebugLogsEnabled(debugContext) },
             surface = null,
             videoWidth = videoWidth,
             videoHeight = videoHeight,
@@ -6576,7 +6578,7 @@ open class CarPlayHostActivity : ComponentActivity() {
                     gestureStartX = pointerCentroid(event, horizontal = true)
                     gestureStartY = pointerCentroid(event, horizontal = false)
                     releaseCarPlayTouches()
-                    appendLog("Settings swipe tracking started; fingers=$gestureFingerCount")
+                    if (debugLogsEnabled) appendLog("Settings swipe tracking started; fingers=$gestureFingerCount")
                     return true
                 }
             }
@@ -6640,7 +6642,7 @@ open class CarPlayHostActivity : ComponentActivity() {
             MotionEvent.ACTION_UP,
             MotionEvent.ACTION_POINTER_UP,
             // The unmasked action keeps the pointer index: ACTION_POINTER_UP(1), not always (0).
-            MotionEvent.ACTION_CANCEL -> Log.i(
+            MotionEvent.ACTION_CANCEL -> if (debugLogsEnabled) Log.i(
                 TAG,
                 "touch action=${MotionEvent.actionToString(event.action)} " +
                     "pointer=${event.getPointerId(event.actionIndex)} pointers=${event.pointerCount} queued=$queued",
@@ -6692,7 +6694,7 @@ open class CarPlayHostActivity : ComponentActivity() {
         heldTouch = null
         heldTouchContent = null
         val queued = content != null && controller?.sendTouch(CarPlayTouchMapper.contacts(held, content)) == true
-        Log.i(TAG, "touch action=ACTION_DOWN pointers=${held.pointerCount} queued=$queued " +
+        if (debugLogsEnabled) Log.i(TAG, "touch action=ACTION_DOWN pointers=${held.pointerCount} queued=$queued " +
             "heldMs=${SystemClock.uptimeMillis() - held.downTime}")
         held.recycle()
     }

@@ -420,14 +420,14 @@ internal object EcarxHudBridge {
                 }
                 lanesByIndex[requireNotNull(update.index)] =
                     if (mapped.all { it != null }) mapped.filterNotNull() else null
-                report("DIM lane cached index=${update.index} count=${update.lanes.size} " +
+                if (NavigationOutputs.debugLogsEnabled()) report("DIM lane cached index=${update.index} count=${update.lanes.size} " +
                     "current=${route.laneGuidanceIndex ?: "none"} guidance=${route.current() != null}")
             }
             pushLaneLocked(false)
             return@synchronized
         }
         val change = route.accept(frame.messageId, frame.payload)
-        report("DIM input source=$source id=0x${frame.messageId.toString(16)} ${route.diagnosticInput} " +
+        if (NavigationOutputs.debugLogsEnabled()) report("DIM input source=$source id=0x${frame.messageId.toString(16)} ${route.diagnosticInput} " +
             "change=$change currentNext=${route.current()?.distanceMeters ?: "none"} " +
             "elapsedMs=${SystemClock.elapsedRealtime()} ${route.diagnosticState()}")
         when (change) {
@@ -549,7 +549,7 @@ internal object EcarxHudBridge {
         }
         presentedPackage = if (show) packageName else null
         if (!show) context?.let { EcarxOutputSettings.setPresentationReleasePending(it, false) }
-        report("presentation switch -> $show package=\"$packageName\"")
+        if (NavigationOutputs.debugLogsEnabled()) report("presentation switch -> $show package=\"$packageName\"")
         return result
     }
 
@@ -567,7 +567,7 @@ internal object EcarxHudBridge {
         lastArrowChannel = null
         ticksSincePush = 0
         pushLocked(force = true)
-        report("DIM re-sent after the mirror was released")
+        if (NavigationOutputs.debugLogsEnabled()) report("DIM re-sent after the mirror was released")
     }
 
     // ---------------------------------------------------------------- push path
@@ -626,7 +626,7 @@ internal object EcarxHudBridge {
         val result = applyPresentationLocked(true)
         presentationAttempts += 1
         // One line at the start of each phase and then once a minute, not once a second.
-        if (presentationAttempts == 1 || !fast && presentationAttempts % 6 == 0) {
+        if (NavigationOutputs.debugLogsEnabled() && (presentationAttempts == 1 || !fast && presentationAttempts % 6 == 0)) {
             report("projection re-asserted #$presentationAttempts every ${interval}s (${result.reason})")
         }
     }
@@ -696,7 +696,7 @@ internal object EcarxHudBridge {
 
         lastPushed = guidance
         ticksSincePush = 0
-        report("DIM publish next=${maneuver.distanceMeters}m arrowId=${guidance.turnId} " +
+        if (NavigationOutputs.debugLogsEnabled()) report("DIM publish next=${maneuver.distanceMeters}m arrowId=${guidance.turnId} " +
             "status=${guidance.status} force=$force first=$firstFrame aggregate=${outcome(result)} " +
             "next=${outcome(nextPoint)} destination=${outcome(remaining)} eta=${outcome(eta)} " +
             "elapsedMs=${SystemClock.elapsedRealtime()}")
@@ -743,7 +743,7 @@ internal object EcarxHudBridge {
         if (wanted == null) {
             if (lastLanePushed != null) {
                 val result = EcarxDimApi.clearLaneInfo(naviRef)
-                report("DIM lane clear ${result.reason} showing=${route.laneGuidanceShowing}")
+                if (!result.ok || NavigationOutputs.debugLogsEnabled()) report("DIM lane clear ${result.reason} showing=${route.laneGuidanceShowing}")
                 if (result.ok) lastLanePushed = null
             }
             return
@@ -751,7 +751,7 @@ internal object EcarxHudBridge {
         if (lastPushed == null || route.current() == null || !EcarxOutputSettings.laneGuidanceEnabled(context ?: return)) return
         if (!force && wanted == lastLanePushed) return
         val result = EcarxDimApi.updateLaneInfo(naviRef, wanted)
-        report("DIM lane ${result.reason} index=${route.laneGuidanceIndex ?: "unspecified"} " +
+        if (!result.ok || NavigationOutputs.debugLogsEnabled()) report("DIM lane ${result.reason} index=${route.laneGuidanceIndex ?: "unspecified"} " +
             "showing=${route.laneGuidanceShowing ?: "unspecified"}")
         if (result.ok) lastLanePushed = wanted
     }
@@ -762,7 +762,7 @@ internal object EcarxHudBridge {
         lanes = null
         val naviRef = navi ?: return
         val result = EcarxDimApi.clearLaneInfo(naviRef)
-        if (lastLanePushed != null || !result.ok) report("DIM lane clear ${result.reason}")
+        if (!result.ok || lastLanePushed != null && NavigationOutputs.debugLogsEnabled()) report("DIM lane clear ${result.reason}")
         if (result.ok) lastLanePushed = null
     }
 

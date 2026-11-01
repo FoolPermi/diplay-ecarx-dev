@@ -230,6 +230,7 @@ class AndroidMediaSink(
     /** Opt-in (#946): navigation prompts request duckable focus while the iPhone ducks audio. Needs [audioFocusEnabled]. */
     navigationPromptAudioFocus: Boolean = false,
     private val navigationOemContent: Boolean = false,
+    private val debugLogsEnabled: () -> Boolean = { false },
 ) : MediaSink {
     // Each downlink publishes its own reference; a mic must match that stream and sample rate.
     private val callEchoReferences = ConcurrentHashMap<AudioStreamId, EchoReference>()
@@ -805,6 +806,7 @@ class AndroidMediaSink(
         videoHeight,
         preferSoftwareHevcDecoder,
         requestKeyFrame = { requestVideoRecovery(type) },
+        debugLogsEnabled = debugLogsEnabled,
         report = { videoDiagnosticHandlers[type]?.invoke(it) },
         statsLabel = statsLabel,
         onExit = ::onVideoDecoderExit,
@@ -848,6 +850,7 @@ class AndroidMediaSink(
             voiceFilter = callVoiceFilter && format.audioType == TELEPHONY_AUDIO_TYPE,
             navigationOemContent = navigationOemContent,
         ).also {
+            it.debugLogsEnabled = debugLogsEnabled
             it.setNavigationAttenuationDb(navigationAttenuationDb)
             if (format.audioType == TELEPHONY_AUDIO_TYPE) it.onRoutedToEarpiece = { moveCallToLoudspeaker(id) }
             audioRenderers[id] = it
@@ -1016,6 +1019,7 @@ private class VideoDecoder(
      */
     private val framesAtOnce: Boolean = false,
     private val mtkDecoderTuningEnabled: Boolean = false,
+    private val debugLogsEnabled: () -> Boolean = { false },
 ) : Closeable {
     private val pacer = FramePacer()
     private val pacingDelay = if (pacingDelayNanos > 0) PacingDelay(pacingDelayNanos) else null
@@ -1183,7 +1187,7 @@ private class VideoDecoder(
                         null -> Unit
                     }
                     if (outputThread == null) decoder?.let(::drainOutput)
-                    stats.logIfDue()?.let(report)
+                    if (debugLogsEnabled()) stats.logIfDue()?.let(report)
                     if (referenceChain.needsKeyFrame && lastConfig != null && outputSurface != null) requestKeyFrameIfDue()
                 } catch (error: Exception) {
                     onJobFailure(job?.javaClass?.simpleName ?: "drain", error)
@@ -1276,7 +1280,7 @@ private class VideoDecoder(
         ) {
             if (!duplicateConfigLogged) {
                 duplicateConfigLogged = true
-                Log.i(TAG, "video decoder config unchanged; keeping existing decoder")
+                if (debugLogsEnabled()) Log.i(TAG, "video decoder config unchanged; keeping existing decoder")
             }
             return
         }
@@ -1533,7 +1537,7 @@ private class VideoDecoder(
                     try {
                         checkNotNull(decoder).setOutputSurface(consumer.surface)
                         outputSurface = consumer.surface
-                        Log.i(TAG, "video decoder parked off screen")
+                        if (debugLogsEnabled()) Log.i(TAG, "video decoder parked off screen")
                     } catch (error: Exception) {
                         Log.w(TAG, "video decoder could not park; releasing it", error)
                         outcome = DetachOutcome.RELEASED
@@ -1544,7 +1548,7 @@ private class VideoDecoder(
                 DetachOutcome.RELEASED -> {
                     outputSurface = null
                     releaseDecoder()
-                    Log.i(TAG, "video decoder detached from surface")
+                    if (debugLogsEnabled()) Log.i(TAG, "video decoder detached from surface")
                 }
             }
         } catch (error: Exception) {
@@ -1563,14 +1567,14 @@ private class VideoDecoder(
         if (surface == null) {
             releaseDecoder()
             queue.discardCurrentChain()
-            Log.i(TAG, "video decoder detached from surface")
+            if (debugLogsEnabled()) Log.i(TAG, "video decoder detached from surface")
             return
         }
         val codec = decoder
         if (codec != null) {
             try {
                 codec.setOutputSurface(surface)
-                Log.i(TAG, "video decoder output surface updated")
+                if (debugLogsEnabled()) Log.i(TAG, "video decoder output surface updated")
                 return
             } catch (error: Exception) {
                 Log.w(TAG, "video decoder output surface update failed; reconfiguring", error)
@@ -1869,6 +1873,7 @@ private class AudioRenderer(
     voiceFilter: Boolean = false,
     private val navigationOemContent: Boolean = false,
 ) : Closeable {
+    var debugLogsEnabled: () -> Boolean = { false }
     private data class AudioPacket(val rtp: ByteArray, val sample: Int, val arrivedNs: Long)
 
     private val pcmChannels = if (format.channels >= 2) 2 else 1
@@ -2663,35 +2668,40 @@ private class AudioRenderer(
         if (mappedChannel == AudioChannel.PHONE) runCatching { checkCallRoute(currentTrack?.routedDevice) }
         // "PHONE " marks the iPhone's own log lines, which the report drops, and it dropped every
         // call's playback line with it (#647).
-        val channelName = if (mappedChannel == AudioChannel.PHONE) "CALL" else mappedChannel?.name
-        val line = "audio stats audioType=${format.audioType} payloadType=${format.payloadType} channel=$channelName " +
-            "routeId=${currentTrack?.routedDevice?.id ?: -1} routeType=${currentTrack?.routedDevice?.type ?: -1} routeAddress=${currentTrack?.routedDevice?.address ?: "none"} " +
-            "usage=${trackAttributes?.usage} contentType=${trackAttributes?.contentType} codec=${format.codec} " +
-            "attributesSource=${if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) "track" else "configured"} legacyStream=${actualLegacyStreamType ?: "none"} " +
-            "trackState=${currentTrack?.state ?: -1} playState=${currentTrack?.playState ?: -1} " +
-            "sampleRate=${currentTrack?.sampleRate ?: format.sampleRate} " +
-            "trackBufferFrames=${currentTrack?.bufferSizeInFrames ?: -1} " +
-            "rx=${packetsReceived.getAndSet(0)} " +
-            "dropped=${packetsDropped.getAndSet(0)} underruns=+${underruns - statsLastUnderruns} queue=${queue.size} " +
-            "playing=$playbackStarted maxGapMs=${maxArrivalGapMs.getAndSet(0)} " +
-            "sinceRxMs=${if (lastRx == 0L) -1 else (now - lastRx) / 1_000_000L} maxWriteMs=$maxWriteMs " +
-            "writtenFrames=$writtenFramesThisWindow totalWrittenFrames=$totalWrittenFrames " +
-            "playbackHeadFrames=${playbackHeadFrames ?: -1} playbackAdvanceFrames=${playbackAdvanceFrames ?: -1} " +
-            "estimatedQueuedFrames=${queuedFrames ?: -1} writeErrors=$writeErrorsThisWindow " +
-            "lastWriteError=${lastWriteErrorCode ?: "none"} zeroWrites=$zeroWritesThisWindow " +
-            "partialWrites=$partialWritesThisWindow " +
-            "decoderDroppedTotal=$inputDropped outputBuffersTotal=$outputBuffers rebuffers=$rebufferCount " +
-            "playbackRate=${clockTrim?.rate ?: -1} ended=$force"
-        Log.i(STATS_TAG, line)
-        report(line)
-        if (format.codec != AudioCodecKind.LPCM) {
-            // Keep this separate: the exported diagnostic recorder caps each line at 700 characters.
-            val decoderLine = "Audio: decoder stats audioType=${format.audioType} codec=${format.codec} " +
-                "inputQueuedTotal=$inputQueued inputDroppedTotal=$inputDropped " +
-                "shortOpusPacketsTotal=$shortOpusPackets decoderUnavailablePacketsTotal=$decoderUnavailablePackets " +
-                "outputBuffersTotal=$outputBuffers ended=$force"
-            Log.i(STATS_TAG, decoderLine)
-            runCatching { report(decoderLine) }
+        val received = packetsReceived.getAndSet(0)
+        val dropped = packetsDropped.getAndSet(0)
+        val arrivalGapMs = maxArrivalGapMs.getAndSet(0)
+        if (debugLogsEnabled()) {
+            val channelName = if (mappedChannel == AudioChannel.PHONE) "CALL" else mappedChannel?.name
+            val line = "audio stats audioType=${format.audioType} payloadType=${format.payloadType} channel=$channelName " +
+                "routeId=${currentTrack?.routedDevice?.id ?: -1} routeType=${currentTrack?.routedDevice?.type ?: -1} routeAddress=${currentTrack?.routedDevice?.address ?: "none"} " +
+                "usage=${trackAttributes?.usage} contentType=${trackAttributes?.contentType} codec=${format.codec} " +
+                "attributesSource=${if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) "track" else "configured"} legacyStream=${actualLegacyStreamType ?: "none"} " +
+                "trackState=${currentTrack?.state ?: -1} playState=${currentTrack?.playState ?: -1} " +
+                "sampleRate=${currentTrack?.sampleRate ?: format.sampleRate} " +
+                "trackBufferFrames=${currentTrack?.bufferSizeInFrames ?: -1} " +
+                "rx=${received} " +
+                "dropped=${dropped} underruns=+${underruns - statsLastUnderruns} queue=${queue.size} " +
+                "playing=$playbackStarted maxGapMs=${arrivalGapMs} " +
+                "sinceRxMs=${if (lastRx == 0L) -1 else (now - lastRx) / 1_000_000L} maxWriteMs=$maxWriteMs " +
+                "writtenFrames=$writtenFramesThisWindow totalWrittenFrames=$totalWrittenFrames " +
+                "playbackHeadFrames=${playbackHeadFrames ?: -1} playbackAdvanceFrames=${playbackAdvanceFrames ?: -1} " +
+                "estimatedQueuedFrames=${queuedFrames ?: -1} writeErrors=$writeErrorsThisWindow " +
+                "lastWriteError=${lastWriteErrorCode ?: "none"} zeroWrites=$zeroWritesThisWindow " +
+                "partialWrites=$partialWritesThisWindow " +
+                "decoderDroppedTotal=$inputDropped outputBuffersTotal=$outputBuffers rebuffers=$rebufferCount " +
+                "playbackRate=${clockTrim?.rate ?: -1} ended=$force"
+            Log.i(STATS_TAG, line)
+            report(line)
+            if (format.codec != AudioCodecKind.LPCM) {
+                // Keep this separate: the exported diagnostic recorder caps each line at 700 characters.
+                val decoderLine = "Audio: decoder stats audioType=${format.audioType} codec=${format.codec} " +
+                    "inputQueuedTotal=$inputQueued inputDroppedTotal=$inputDropped " +
+                    "shortOpusPacketsTotal=$shortOpusPackets decoderUnavailablePacketsTotal=$decoderUnavailablePackets " +
+                    "outputBuffersTotal=$outputBuffers ended=$force"
+                Log.i(STATS_TAG, decoderLine)
+                runCatching { report(decoderLine) }
+            }
         }
         statsLastUnderruns = underruns
         maxWriteMs = 0L

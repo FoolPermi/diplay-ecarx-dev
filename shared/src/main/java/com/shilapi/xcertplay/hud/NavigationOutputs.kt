@@ -15,6 +15,8 @@ object NavigationOutputs {
     @Volatile private var useEcarx = false
     @Volatile private var currentSession: (() -> Boolean)? = null
 
+    @Volatile internal var debugLogsEnabled: () -> Boolean = { false }
+
     private val ecarx = NavigationOutputWorker("diplay-ecarx-output", EcarxHudBridge::clear)
 
     /**
@@ -114,13 +116,15 @@ object NavigationOutputs {
     }
 
     /** Route-update silence is not a disconnect; the transport owns this liveness check. */
-    internal fun onSessionActive(isCurrent: () -> Boolean) {
+    internal fun onSessionActive(debugLogs: () -> Boolean = { false }, isCurrent: () -> Boolean) {
+        debugLogsEnabled = debugLogs
         currentSession = isCurrent
         if (useEcarx) ecarx.submit { EcarxHudBridge.setCurrentSession(isCurrent) }
     }
 
     /** Best effort while alive; Android does not guarantee callbacks before force-stop. */
     fun endNow() {
+        debugLogsEnabled = { false }
         currentSession = null
         ecarx.clear()
     }
