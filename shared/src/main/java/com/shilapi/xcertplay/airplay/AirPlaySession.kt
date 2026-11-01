@@ -43,6 +43,7 @@ interface AirPlaySessionListener {
     fun onVideoPlaybackUiRequested(session: AirPlaySession) {}
     /** False when this listener drops "TRACE " lines: the session then skips building their hex dumps. */
     val wantsTrace: Boolean get() = true
+    val debugLogsEnabled: Boolean get() = false
     fun onDebugLog(message: String) {}
 }
 
@@ -116,6 +117,7 @@ class AirPlaySession(
     private var eventCipher: ControlCipher? = null
     private var eventCseq = 0
     private var pendingNightMode: Boolean? = null
+    private val nightModeRequests = linkedMapOf<Int, Boolean>()
     private val firstTouchSendLogged = AtomicBoolean(false)
     private val touchSendFailureLogged = AtomicBoolean(false)
     // Only the controller's single touch thread calls sendTouch.
@@ -451,6 +453,12 @@ class AirPlaySession(
             linkedMapOf("type" to "setNightMode", "params" to linkedMapOf("nightMode" to night)),
         )
         if (sent) pendingNightMode = null
+        if (sent && listener.debugLogsEnabled) {
+            // The reader uses the same lock so even an immediate response can be correlated.
+            if (nightModeRequests.size >= 16) nightModeRequests.remove(nightModeRequests.keys.first())
+            nightModeRequests[eventCseq] = night
+            debugLog("THEME_DIAGNOSTIC tx cseq=$eventCseq night=$night")
+        }
         return sent
     }
 
@@ -959,7 +967,17 @@ class AirPlaySession(
                 val parsed = RtspMessage.parseMessages(plaintext)
                 plaintext = parsed.rest
                 for (message in parsed.messages) {
-                    if (message.method.startsWith("RTSP/") || message.method.startsWith("HTTP/")) continue
+                    if (message.method.startsWith("RTSP/") || message.method.startsWith("HTTP/")) {
+                        if (!listener.debugLogsEnabled) continue
+                        val seq = message.headers["cseq"]?.toIntOrNull() ?: continue
+                        val night = synchronized(eventWriteLock) { nightModeRequests.remove(seq) } ?: continue
+                        val status = if (message.body.size in 1..4096) runCatching {
+                            asMap(BplistCodec.decode(message.body))?.get("status") as? Number
+                        }.getOrNull() else null
+                        debugLog("THEME_DIAGNOSTIC rx cseq=$seq night=$night rtspStatus=${message.path.toIntOrNull()} " +
+                            "bytes=${message.body.size} plistStatus=$status")
+                        continue
+                    }
                     debugLog(
                         "airplay event rx ${message.method} ${message.path} cseq=${message.headers["cseq"] ?: "-"} body=${message.body.size}",
                     )

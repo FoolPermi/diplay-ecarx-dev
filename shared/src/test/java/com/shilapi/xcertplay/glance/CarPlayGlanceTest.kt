@@ -55,6 +55,21 @@ class CarPlayGlanceTest {
     }
 
     @Test
+    fun logsRouteDetailsOnlyWhileDebugIsEnabled() {
+        val update = frame(0x5201) { u8(1, 1); u32(0x0a, 350); u16List(0x0d, listOf(7)) }
+        CarPlayGlance.onFrame(frame(0x5202) { u16(1, 7); u8(3, 2); string(4, "Main Street") })
+        val logs = { org.robolectric.shadows.ShadowLog.getLogsForTag("DiPlay-Lane").count { "road=Main Street" in it.msg } }
+        val before = logs()
+        CarPlayGlance.onFrame(update)
+        assertEquals(before, logs())
+        CarPlayGlance.onFrame(update, debugLogsEnabled = true)
+        assertEquals(before + 1, logs())
+        CarPlayGlance.onFrame(update)
+        assertEquals(before + 1, logs())
+        assertEquals("Main Street", CarPlayGlance.snapshot().road)
+    }
+
+    @Test
     fun routeEndAndSessionEnd() {
         CarPlayGlance.setConnected(true)
         CarPlayGlance.onFrame(frame(0x5202) { u16(1, 1); u8(3, 1) })

@@ -50,6 +50,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.shilapi.xcertplay.adb.AdbDiagnostics
+import com.shilapi.xcertplay.adb.AdbKeys
 import com.shilapi.xcertplay.adb.LocalAdb
 import com.shilapi.xcertplay.airplay.AirPlayDisplaySettings
 import com.shilapi.xcertplay.airplay.CarPlayClusterDisplay
@@ -3686,6 +3687,29 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 MediaSessionSettings.setHySiriKey(this, keys[it])
             }
             card.addView(label(getString(R.string.settings_hy_siri_key_description), 14, MUTED))
+            if (Build.VERSION.SDK_INT == Build.VERSION_CODES.P &&
+                checkSelfPermission(Manifest.permission.READ_LOGS) != PackageManager.PERMISSION_GRANTED) {
+                card.addView(button(getString(R.string.settings_hy_siri_grant_logs), false) {
+                    Thread({
+                        val access = runCatching {
+                            LocalAdb(AdbKeys.load(applicationContext)).use { adb ->
+                                adb.connect(mayAsk = true).also {
+                                    if (it == LocalAdb.Access.READY) {
+                                        adb.shell("pm grant $packageName android.permission.READ_LOGS")
+                                    }
+                                }
+                            }
+                        }.getOrDefault(LocalAdb.Access.UNREACHABLE)
+                        runOnUiThread {
+                            val granted = checkSelfPermission(Manifest.permission.READ_LOGS) == PackageManager.PERMISSION_GRANTED
+                            toast(getString(if (granted) R.string.settings_hy_siri_grant_success
+                                else R.string.settings_hy_siri_grant_failed))
+                            if (!granted) Log.w("DiPlay", "HY Siri log permission failed: $access")
+                            render()
+                        }
+                    }, "diplay-hy-siri-grant").start()
+                }, matchButton(10, 56))
+            }
             settingsDetails(card, R.string.settings_hy_siri_background, hySiriBackgroundExpanded,
                 { hySiriBackgroundExpanded = it }) { wheelKeyServiceControls(it) }
         }

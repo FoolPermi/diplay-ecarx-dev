@@ -356,6 +356,7 @@ class CarPlayController(
 
     private val sessionListener = object : AirPlaySessionListener {
         // Trace lines reach logcat and the UI; build them only for `setprop log.tag.DiPlayTrace VERBOSE` or a UI that wants them.
+        override val debugLogsEnabled: Boolean get() = uiListener?.debugLogsEnabled == true
         override val wantsTrace: Boolean
             get() = uiListener?.wantsTrace == true || Log.isLoggable(TRACE_LOG_TAG, Log.VERBOSE)
 
@@ -904,7 +905,7 @@ class CarPlayController(
     private fun onRouteFrame(frame: com.shilapi.xcertplay.iap2.wire.Iap2Frame, source: String) {
         val receivedNs = System.nanoTime()
         NavigationOutputs.onFrame(frame, source)
-        com.shilapi.xcertplay.glance.CarPlayGlance.onFrame(frame)
+        com.shilapi.xcertplay.glance.CarPlayGlance.onFrame(frame, sessionListener.debugLogsEnabled)
         synchronized(playbackStatus) {
             val previous = playbackStatus.nowPlaying
             playbackStatus.acceptUpdate(frame)?.let { update ->

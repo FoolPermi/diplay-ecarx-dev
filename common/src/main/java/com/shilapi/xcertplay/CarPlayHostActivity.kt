@@ -519,7 +519,7 @@ open class CarPlayHostActivity : ComponentActivity() {
     private var advancedAudioChannelMappingSupported = false
     private var advancedAudioChannelMapping = false
     private var navigationStreamType = 14
-    private var debugLogsEnabled = false
+    @Volatile private var debugLogsEnabled = false
     private var autoStartOnBoot = false
     private var manufacturer = AirPlayPersistence.DEFAULT_MANUFACTURER
     private var model = AirPlayPersistence.DEFAULT_MODEL
@@ -5356,6 +5356,7 @@ open class CarPlayHostActivity : ComponentActivity() {
                 }
             }
 
+            override val debugLogsEnabled: Boolean get() = this@CarPlayHostActivity.debugLogsEnabled
             override val wantsTrace: Boolean get() = false
 
             override fun onDebugLog(message: String) {

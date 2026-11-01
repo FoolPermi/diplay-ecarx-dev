@@ -923,4 +923,7 @@
     <string name="settings_hy_siri_key">HY Siri 按鍵</string>
     <string name="settings_hy_siri_key_description">在 HY 方向盤設定中選擇對應的模擬按鍵組。Android 9 授予讀取系統記錄權限後，DiPlay 在背景也能喚醒 Siri，前景應用程式同時收到按鍵。</string>
     <string name="settings_hy_siri_background">實體按鍵無障礙服務</string>
+    <string name="settings_hy_siri_grant_logs">啟用 HY 背景喚醒 Siri</string>
+    <string name="settings_hy_siri_grant_success">權限已授予，請重新連接 CarPlay 以啟用背景喚醒。</string>
+    <string name="settings_hy_siri_grant_failed">無法授予系統記錄權限，請開啟本機 ADB、同意授權提示後重試。</string>
 </resources>

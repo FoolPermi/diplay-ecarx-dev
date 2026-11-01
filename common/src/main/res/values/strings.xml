@@ -965,4 +965,7 @@
     <string name="settings_hy_siri_key">HY Siri key</string>
     <string name="settings_hy_siri_key_description">In HY, assign the matching simulated-key pair. On Android 9, system log access lets Siri respond in the background while the foreground app also receives the key.</string>
     <string name="settings_hy_siri_background">Accessibility service for hardware keys</string>
+    <string name="settings_hy_siri_grant_logs">Enable HY Siri in the background</string>
+    <string name="settings_hy_siri_grant_success">Permission granted. Reconnect CarPlay to enable background Siri.</string>
+    <string name="settings_hy_siri_grant_failed">Could not grant system log access. Enable local ADB, approve its prompt, and try again.</string>
 </resources>

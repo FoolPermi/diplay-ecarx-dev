@@ -50,7 +50,7 @@ object CarPlayGlance {
         return current
     }
 
-    fun onFrame(frame: Iap2Frame) {
+    fun onFrame(frame: Iap2Frame, debugLogsEnabled: Boolean = false) {
         if (frame.messageId == LANE_GUIDANCE_UPDATE) {
             // Lane guidance is a side channel: log it, hand it to whoever draws lanes, and leave
             // the route/now-playing state alone.
@@ -64,8 +64,14 @@ object CarPlayGlance {
         }
         val changed = synchronized(this) {
             when (frame.messageId) {
-                RouteGuidanceState.ROUTE_GUIDANCE_UPDATE, RouteGuidanceState.ROUTE_GUIDANCE_MANEUVER_UPDATE ->
+                RouteGuidanceState.ROUTE_GUIDANCE_UPDATE, RouteGuidanceState.ROUTE_GUIDANCE_MANEUVER_UPDATE -> {
                     runCatching { route.accept(frame.messageId, frame.payload) }
+                    if (debugLogsEnabled) route.current()?.let { m ->
+                        val id = "0x" + frame.messageId.toString(16).padStart(4, '0')
+                        android.util.Log.i(TAG, "$id d=${m.distanceMeters}m remain=${m.remainingMeters} " +
+                            "road=${m.road} type=${m.type}")
+                    }
+                }
                 ClusterSongState.NOW_PLAYING_UPDATE -> runCatching { song.accept(frame) }
                 else -> return
             }
