@@ -25,6 +25,7 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.LooperMode
+import org.robolectric.shadows.ShadowLog
 import org.robolectric.util.ReflectionHelpers
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.TimeUnit
@@ -430,6 +431,22 @@ internal class EcarxVoiceTakeoverTest {
         assertEquals(1, factoryPresses)
         verify(controller, never()).requestSiri()
         assertTrue(WheelKeyLog.report(false).any { it.contains("ordered=false queued=false") })
+    }
+
+    @Test fun everyVoiceBroadcastLeavesADiagnosticLineSayingWhoKeptIt() {
+        `when`(controller.activeAirPlaySession()).thenReturn(phone)
+        CarPlayMediaSession.onSessionActive(controller, phone)
+        // A taken press, HY's own marked press, and one we hand to the factory / HY after a
+        // setting change: the three outcomes a real-car log has to tell apart.
+        send(0)
+        send(0, marked = true)
+        MediaSessionSettings.setVoiceKeyPress(app, VoiceKeyPress.LONG)
+        send(0)
+        val lines = ShadowLog.getLogsForTag("DiPlay-Ecarx-SwKey").map { it.msg }
+        assertTrue(lines.any { it.contains("voice broadcast receiver registered priority=MAX") })
+        assertTrue(lines.any { it.contains("voice broadcast press=short hy=0 take ordered=true") })
+        assertTrue(lines.any { it.contains("voice broadcast press=short hy=1 pass reason=hy-marker") })
+        assertTrue(lines.any { it.contains("voice broadcast press=short hy=0 pass reason=press-not-owned") })
     }
 
     @Test fun activityKeyCleanupDoesNotRemoveTheSessionReceiver() {
