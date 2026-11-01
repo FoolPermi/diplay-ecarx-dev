@@ -9,11 +9,8 @@ import java.net.Socket
  * The MQTT 3.1.1 bytes the ECARX DIM stack speaks, in one place.
  *
  * `se.cevt.dimsupportservice` publishes its `ihu/…` state to a loopback broker, so anything DiPlay
- * wants to observe or re-assert on that bus needs the same framing. This object owns only the
- * protocol (connect/publish/subscribe packets, packet reading, PUBLISH decoding, JSON escaping) and
- * the short connect/publish/subscribe round-trips; socket *lifetime* stays with the caller, because
- * [EcarxProjectionChannel] keeps one long-lived publisher while [EcarxDimDistanceGuard] keeps a
- * blocking subscriber and a separate publisher.
+ * publishes on that bus needs the same framing. This object owns the connect/publish packets,
+ * acknowledgements and JSON escaping; [EcarxProjectionChannel] owns the publisher's lifetime.
  */
 internal object EcarxMqtt {
     const val DEFAULT_HOST = "127.0.0.1"
@@ -57,13 +54,6 @@ internal object EcarxMqtt {
         }
     }.getOrElse { "write failed ${reason(it)}" }
 
-    /** Subscribe (QoS 1) to [topics] and wait for the SUBACK. */
-    fun subscribe(socket: Socket, packetId: Int, topics: List<String>): Boolean = runCatching {
-        socket.getOutputStream().apply { write(subscribePacket(packetId, topics)); flush() }
-        val ack = readPacket(socket.getInputStream())
-        ack != null && (ack.first and 0xF0) == 0x90
-    }.getOrElse { false }
-
     fun connectPacket(clientId: String): ByteArray {
         val body = ByteArrayOutputStream()
         mqttString(body, "MQTT")
@@ -84,18 +74,6 @@ internal object EcarxMqtt {
         val bytes = payload.toByteArray(Charsets.UTF_8)
         body.write(bytes, 0, bytes.size)
         return frame(0x32, body.toByteArray())
-    }
-
-    /** SUBSCRIBE with QoS 1 for each topic. */
-    fun subscribePacket(id: Int, topics: List<String>): ByteArray {
-        val body = ByteArrayOutputStream()
-        body.write((id ushr 8) and 0xFF)
-        body.write(id and 0xFF)
-        for (topic in topics) {
-            mqttString(body, topic)
-            body.write(1) // requested QoS 1
-        }
-        return frame(0x82, body.toByteArray())
     }
 
     private fun frame(type: Int, body: ByteArray): ByteArray {
@@ -141,23 +119,6 @@ internal object EcarxMqtt {
             read += count
         }
         return first to body
-    }
-
-    /** Extracts `(topic, payload)` from a PUBLISH packet, or null when `first` is not a PUBLISH. */
-    fun parsePublish(first: Int, body: ByteArray): Pair<String, String>? {
-        if ((first and 0xF0) != 0x30 || body.size < 2) return null
-        val qos = (first ushr 1) and 0x03
-        var index = 0
-        val topicLength = ((body[index].toInt() and 0xFF) shl 8) or (body[index + 1].toInt() and 0xFF)
-        index += 2
-        if (topicLength < 0 || index + topicLength > body.size) return null
-        val topic = String(body, index, topicLength, Charsets.UTF_8)
-        index += topicLength
-        if (qos > 0) {
-            if (index + 2 > body.size) return null
-            index += 2
-        }
-        return topic to String(body, index, body.size - index, Charsets.UTF_8)
     }
 
     /** Minimal JSON string escaping for MQTT payloads built by hand. */

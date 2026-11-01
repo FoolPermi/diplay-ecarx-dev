@@ -1,0 +1,130 @@
+[
+  {
+    "stage": "attached without directions",
+    "passed": true,
+    "setting": 1,
+    "pid": "3250",
+    "owned": false,
+    "original": null
+  },
+  {
+    "stage": "first guidance",
+    "passed": true,
+    "setting": 3,
+    "pid": "",
+    "owned": true,
+    "original": 1
+  },
+  {
+    "stage": "arrived immediately re-enabled",
+    "passed": true,
+    "setting": 1,
+    "pid": "",
+    "owned": true,
+    "original": 1
+  },
+  {
+    "stage": "arrived confirmed",
+    "passed": true,
+    "setting": 1,
+    "pid": "6165",
+    "owned": false,
+    "original": null
+  },
+  {
+    "stage": "second route",
+    "passed": true,
+    "setting": 3,
+    "pid": "",
+    "owned": true,
+    "original": 1
+  },
+  {
+    "stage": "cancel then pending restart",
+    "passed": true,
+    "setting": 1,
+    "pid": "",
+    "owned": true,
+    "original": 1
+  },
+  {
+    "stage": "rapid re-entry",
+    "passed": true,
+    "setting": 3,
+    "pid": "",
+    "owned": true,
+    "original": 1
+  },
+  {
+    "stage": "re-entry after previous restart deadline",
+    "passed": true,
+    "setting": 3,
+    "pid": "",
+    "owned": true,
+    "original": 1
+  },
+  {
+    "stage": "cancel confirmed",
+    "passed": true,
+    "setting": 1,
+    "pid": "6473",
+    "owned": false,
+    "original": null
+  },
+  {
+    "stage": "before disconnect",
+    "passed": true,
+    "setting": 3,
+    "pid": "",
+    "owned": true,
+    "original": 1
+  },
+  {
+    "stage": "session detached restored",
+    "passed": true,
+    "setting": 1,
+    "pid": "6689",
+    "owned": false,
+    "original": null
+  },
+  {
+    "stage": "driver disabled before guidance",
+    "passed": true,
+    "setting": 3,
+    "pid": "",
+    "owned": false,
+    "original": null
+  },
+  {
+    "stage": "driver choice unchanged after arrival",
+    "passed": true,
+    "setting": 3,
+    "pid": "",
+    "owned": false,
+    "original": null
+  },
+  {
+    "stage": "captured Baidu route before force-stop",
+    "passed": true,
+    "setting": 3,
+    "pid": "",
+    "owned": true,
+    "original": 1
+  },
+  {
+    "stage": "force-stopped, persisted ownership",
+    "passed": true,
+    "setting": 3,
+    "pid": "",
+    "owned": true,
+    "original": 1
+  },
+  {
+    "stage": "ordinary app reopen recovered",
+    "passed": true,
+    "setting": 1,
+    "pid": "7175",
+    "owned": false,
+    "original": null
+  }
+]

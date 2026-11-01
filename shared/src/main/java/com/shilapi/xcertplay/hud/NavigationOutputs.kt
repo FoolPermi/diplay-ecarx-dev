@@ -23,6 +23,7 @@ object NavigationOutputs {
      */
     fun onAppOpened(context: Context) {
         val app = context.applicationContext
+        EcarxHudBridge.recoverFactoryNavigationIfIdle(app)
         if (!EcarxCapabilities.detect(app).identified) return
         if (EcarxOutputSettings.enabled(app) || EcarxOutputSettings.presentationSwitch(app) ||
             EcarxOutputSettings.presentationReleasePending(app)) {
@@ -35,6 +36,7 @@ object NavigationOutputs {
         useEcarx = EcarxCapabilities.detect(app).identified
         if (useEcarx) {
             ecarx.start {
+                EcarxHudBridge.recoverFactoryNavigationIfIdle(app)
                 EcarxHudBridge.initialize(app)
                 EcarxHudBridge.setCurrentSession(currentSession)
             }

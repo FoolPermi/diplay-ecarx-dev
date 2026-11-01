@@ -23,6 +23,8 @@ class Iap2LaneGuidanceTest {
     )
 
     @Test fun capturedLanesKeepAnglesAndHighlightWithoutAddingAnArrow() {
+        assertEquals(0, Iap2LaneGuidance.parseUpdate(sample)?.index)
+        assertEquals(21, Iap2LaneGuidance.parseUpdate(compound)?.index)
         val lanes = requireNotNull(Iap2LaneGuidance.parse(sample))
         assertEquals(listOf(0, 1, 2), lanes.map { it.index })
         assertEquals(listOf(listOf(-90), listOf(0), listOf(0)), lanes.map { it.angles })

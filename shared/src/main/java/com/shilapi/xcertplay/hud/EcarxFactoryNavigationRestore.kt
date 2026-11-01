@@ -1,22 +1,15 @@
 package com.shilapi.xcertplay.hud
 
+import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
 
-/**
- * One-time recovery for a head unit left with `ecarx.naviservice` paused by an older DiPlay build.
- *
- * Those builds disabled the whole package during guidance and persisted `owned=true` before doing
- * so. Enabling the package again does not restore widget instances the launcher removed, but it is
- * the step that lets the user re-add them; doing it here means an upgrade never needs a manual
- * `adb shell pm enable`. The saved original state is restored (normally `DEFAULT`), the service is
- * restarted, and the flag is cleared so this runs at most once per paused install.
- *
- * Only a package *we* paused is touched: a `DISABLED_USER` the driver chose is left alone because
- * the `owned` flag would be absent.
- */
+/** Owns only the factory navigation package paused by DiPlay; widget bindings are not restored. */
 object EcarxFactoryNavigationRestore {
     private const val PACKAGE_NAME = "ecarx.naviservice"
     private const val SERVICE_CLASS = "ecarx.naviservice.service.NaviService"
@@ -24,38 +17,112 @@ object EcarxFactoryNavigationRestore {
     private const val KEY_OWNED = "owned"
     private const val KEY_ORIGINAL = "original"
     private const val PERMISSION = "android.permission.CHANGE_COMPONENT_ENABLED_STATE"
+    private const val PROCESS_PERMISSION = "android.permission.REAL_GET_TASKS"
+    private const val TAG = "DiPlay-ECARX"
+    private val handler by lazy { Handler(Looper.getMainLooper()) }
+    private var pending: Runnable? = null
+    private var generation = 0L
+    private var lastResult = "factoryNavigation idle"
+    private var lastAsyncResult = "not-attempted"
 
+    @Synchronized
+    fun pauseForGuidance(context: Context): String {
+        generation++
+        pending?.let { handler.removeCallbacks(it) }
+        pending = null
+        return runCatching {
+            val store = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val manager = context.packageManager
+            val before = manager.getApplicationEnabledSetting(PACKAGE_NAME)
+            val owned = store.getBoolean(KEY_OWNED, false)
+            if (isDisabled(before)) {
+                return record("factoryNavigation pause=already-disabled owned=$owned setting=$before")
+            }
+            check(context.checkSelfPermission(PERMISSION) == PackageManager.PERMISSION_GRANTED) { "permission-required" }
+            // Persist before changing the package so a killed process can recover on the next open.
+            if (!owned) {
+                check(store.edit().putBoolean(KEY_OWNED, true).putInt(KEY_ORIGINAL, before).commit()) { "marker-write-failed" }
+            }
+            manager.setApplicationEnabledSetting(PACKAGE_NAME, PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER, 0)
+            val after = manager.getApplicationEnabledSetting(PACKAGE_NAME)
+            check(after == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER) { "unconfirmed setting=$after" }
+            record("factoryNavigation pause=disabled owned=true before=$before setting=$after")
+        }.getOrElse { record("factoryNavigation pause=failed error=${it.message}", true) }
+    }
+
+    /** Call only without active guidance; repeated calls keep the original two-second deadline. */
     @Synchronized
     fun restoreIfPausedByUs(context: Context): String {
         val store = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        if (!store.getBoolean(KEY_OWNED, false)) return "factoryNavigation restore=not-owned"
-        val manager = context.packageManager
-        val current = runCatching { manager.getApplicationEnabledSetting(PACKAGE_NAME) }.getOrNull()
-        if (current == null) {
-            store.edit().remove(KEY_OWNED).remove(KEY_ORIGINAL).commit()
-            return "factoryNavigation restore=not-installed"
-        }
-        if (context.checkSelfPermission(PERMISSION) != PackageManager.PERMISSION_GRANTED) {
-            return "factoryNavigation restore=permission-required owned=true"
-        }
-        val original = store.getInt(KEY_ORIGINAL, PackageManager.COMPONENT_ENABLED_STATE_DEFAULT)
-        if (isDisabled(current)) {
-            runCatching { manager.setApplicationEnabledSetting(PACKAGE_NAME, original, 0) }
-        }
-        val after = runCatching { manager.getApplicationEnabledSetting(PACKAGE_NAME) }.getOrNull()
-        if (after == null || isDisabled(after)) {
-            return "factoryNavigation restore=unconfirmed owned=true setting=$after"
-        }
+        if (!store.getBoolean(KEY_OWNED, false)) return record("factoryNavigation restore=not-owned")
+        if (pending != null) return lastResult
+        return runCatching {
+            check(context.checkSelfPermission(PERMISSION) == PackageManager.PERMISSION_GRANTED) { "permission-required owned=true" }
+            val manager = context.packageManager
+            val before = manager.getApplicationEnabledSetting(PACKAGE_NAME)
+            val original = store.getInt(KEY_ORIGINAL, PackageManager.COMPONENT_ENABLED_STATE_DEFAULT)
+            check(original == PackageManager.COMPONENT_ENABLED_STATE_DEFAULT || original == PackageManager.COMPONENT_ENABLED_STATE_ENABLED) { "invalid-original setting=$original" }
+            if (before != original) manager.setApplicationEnabledSetting(PACKAGE_NAME, original, 0)
+            val after = manager.getApplicationEnabledSetting(PACKAGE_NAME)
+            check(after == original) { "unconfirmed owned=true setting=$after" }
+            val app = context.applicationContext
+            val token = ++generation
+            pending = Runnable { startRestoredService(app, token) }.also { handler.postDelayed(it, 2_000L) }
+            record("factoryNavigation restore=enabled before=$before setting=$after serviceStart=delayed owned=true")
+        }.getOrElse { record("factoryNavigation restore=failed error=${it.message}", true) }
+    }
+
+    @Synchronized
+    fun state(context: Context): String {
+        val owned = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_OWNED, false)
+        val setting = runCatching { context.packageManager.getApplicationEnabledSetting(PACKAGE_NAME) }.getOrNull()
+        return "$lastResult; owned=$owned setting=$setting pending=${pending != null} async=$lastAsyncResult"
+    }
+
+    @Synchronized
+    private fun startRestoredService(context: Context, token: Long) {
+        if (token != generation) return
+        pending = null
         runCatching {
+            check(!isDisabled(context.packageManager.getApplicationEnabledSetting(PACKAGE_NAME))) { "package-disabled" }
             val intent = Intent().setClassName(PACKAGE_NAME, SERVICE_CLASS)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
-            else context.startService(intent)
-        }
-        store.edit().remove(KEY_OWNED).remove(KEY_ORIGINAL).commit()
-        return "factoryNavigation restore=enabled setting=$after serviceStart=requested"
+            val component = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
+                else context.startService(intent)
+            check(component != null) { "service-not-found" }
+            lastAsyncResult = record("factoryNavigation restore=enabled serviceStart=requested owned=true")
+            pending = Runnable { verifyRestart(context, token, 5) }.also { handler.postDelayed(it, 1_000L) }
+        }.onFailure { lastAsyncResult = record("factoryNavigation restore=failed owned=true error=${it.message}", true) }
+    }
+
+    @Synchronized
+    private fun verifyRestart(context: Context, token: Long, attempts: Int) {
+        if (token != generation) return
+        pending = null
+        runCatching {
+            check(context.checkSelfPermission(PROCESS_PERMISSION) == PackageManager.PERMISSION_GRANTED) { "process-permission-required" }
+            val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            val running = manager.runningAppProcesses.orEmpty().any { process ->
+                process.pid > 0 && (process.processName == PACKAGE_NAME || process.pkgList?.contains(PACKAGE_NAME) == true)
+            }
+            if (!running && attempts > 1) {
+                pending = Runnable { verifyRestart(context, token, attempts - 1) }.also { handler.postDelayed(it, 1_000L) }
+                return
+            }
+            check(running) { "process-unconfirmed" }
+            check(!isDisabled(context.packageManager.getApplicationEnabledSetting(PACKAGE_NAME))) { "package-disabled" }
+            check(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(KEY_OWNED).remove(KEY_ORIGINAL).commit()) { "marker-clear-failed" }
+            lastAsyncResult = record("factoryNavigation restore=running serviceStart=confirmed owned=false")
+        }.onFailure { lastAsyncResult = record("factoryNavigation restore=failed owned=true error=${it.message}", true) }
+    }
+
+    private fun record(message: String, failed: Boolean = false): String {
+        lastResult = message
+        if (failed) Log.w(TAG, message) else Log.i(TAG, message)
+        return message
     }
 
     private fun isDisabled(state: Int): Boolean =
         state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED ||
-            state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER
+            state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER ||
+            state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED_UNTIL_USED
 }

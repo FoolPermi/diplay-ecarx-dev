@@ -1,0 +1,603 @@
+{
+  "frameTotals": {
+    "apple-r1": 326,
+    "apple": 280,
+    "baidu": 735,
+    "amap": 531
+  },
+  "checkpoints": {
+    "apple-r1-visible": {
+      "frames": 191,
+      "navStatus": 1,
+      "laneIconIds": [
+        1,
+        1,
+        30,
+        15,
+        3
+      ],
+      "similarities": [
+        [
+          "renderer",
+          1,
+          1,
+          0.999,
+          {
+            "grey": 56.0
+          }
+        ],
+        [
+          "primary-overlay",
+          1,
+          1,
+          0.922,
+          {
+            "grey": 45.0
+          }
+        ],
+        [
+          "renderer",
+          2,
+          1,
+          0.999,
+          {
+            "grey": 56.0
+          }
+        ],
+        [
+          "primary-overlay",
+          2,
+          1,
+          0.912,
+          {
+            "grey": 44.0
+          }
+        ],
+        [
+          "renderer",
+          3,
+          30,
+          1.0,
+          {
+            "grey": 56.0,
+            "white": 235.0
+          }
+        ],
+        [
+          "primary-overlay",
+          3,
+          30,
+          0.946,
+          {
+            "grey": 45.0,
+            "white": 188.0
+          }
+        ],
+        [
+          "renderer",
+          4,
+          15,
+          0.999,
+          {
+            "white": 236.0
+          }
+        ],
+        [
+          "primary-overlay",
+          4,
+          15,
+          0.939,
+          {
+            "white": 189.0
+          }
+        ],
+        [
+          "renderer",
+          5,
+          3,
+          0.999,
+          {
+            "grey": 58.0
+          }
+        ],
+        [
+          "primary-overlay",
+          5,
+          3,
+          0.937,
+          {
+            "grey": 46.0
+          }
+        ]
+      ],
+      "errors": [],
+      "factoryNavigation": {
+        "setting": 3,
+        "pid": "",
+        "amapPid": "4304",
+        "owned": true
+      }
+    },
+    "apple-r1-end": {
+      "frames": 135,
+      "navStatus": 0,
+      "laneIconIds": [],
+      "similarities": [],
+      "errors": [],
+      "factoryNavigation": {
+        "setting": 1,
+        "pid": "6774",
+        "amapPid": "4304",
+        "owned": false
+      }
+    },
+    "apple-0": {
+      "frames": 58,
+      "navStatus": 1,
+      "laneIconIds": [
+        16,
+        0,
+        4
+      ],
+      "similarities": [
+        [
+          "renderer",
+          1,
+          16,
+          1.0,
+          {
+            "white": 235.0
+          }
+        ],
+        [
+          "primary-overlay",
+          1,
+          16,
+          0.933,
+          {
+            "white": 188.0
+          }
+        ],
+        [
+          "renderer",
+          2,
+          0,
+          0.999,
+          {
+            "grey": 56.0
+          }
+        ],
+        [
+          "primary-overlay",
+          2,
+          0,
+          0.92,
+          {
+            "grey": 45.0
+          }
+        ],
+        [
+          "renderer",
+          3,
+          4,
+          0.999,
+          {
+            "grey": 57.0
+          }
+        ],
+        [
+          "primary-overlay",
+          3,
+          4,
+          0.927,
+          {
+            "grey": 45
+          }
+        ]
+      ],
+      "errors": [],
+      "factoryNavigation": {
+        "setting": 3,
+        "pid": "",
+        "amapPid": "4304",
+        "owned": true
+      }
+    },
+    "apple-hide": {
+      "frames": 12,
+      "navStatus": 1,
+      "laneIconIds": [],
+      "similarities": [],
+      "errors": [],
+      "factoryNavigation": {
+        "setting": 3,
+        "pid": "",
+        "amapPid": "4304",
+        "owned": true
+      }
+    },
+    "apple-1": {
+      "frames": 15,
+      "navStatus": 1,
+      "laneIconIds": [
+        16,
+        0,
+        4
+      ],
+      "similarities": [
+        [
+          "renderer",
+          1,
+          16,
+          1.0,
+          {
+            "white": 235.0
+          }
+        ],
+        [
+          "primary-overlay",
+          1,
+          16,
+          0.933,
+          {
+            "white": 188.0
+          }
+        ],
+        [
+          "renderer",
+          2,
+          0,
+          0.999,
+          {
+            "grey": 56.0
+          }
+        ],
+        [
+          "primary-overlay",
+          2,
+          0,
+          0.92,
+          {
+            "grey": 45.0
+          }
+        ],
+        [
+          "renderer",
+          3,
+          4,
+          0.999,
+          {
+            "grey": 57.0
+          }
+        ],
+        [
+          "primary-overlay",
+          3,
+          4,
+          0.927,
+          {
+            "grey": 45
+          }
+        ]
+      ],
+      "errors": [],
+      "factoryNavigation": {
+        "setting": 3,
+        "pid": "",
+        "amapPid": "4304",
+        "owned": true
+      }
+    },
+    "apple-end": {
+      "frames": 195,
+      "navStatus": 0,
+      "laneIconIds": [],
+      "similarities": [],
+      "errors": [],
+      "factoryNavigation": {
+        "setting": 1,
+        "pid": "7100",
+        "amapPid": "4304",
+        "owned": false
+      }
+    },
+    "baidu-0": {
+      "frames": 242,
+      "navStatus": 1,
+      "laneIconIds": [
+        16,
+        0,
+        4
+      ],
+      "similarities": [
+        [
+          "renderer",
+          1,
+          16,
+          1.0,
+          {
+            "white": 235.0
+          }
+        ],
+        [
+          "primary-overlay",
+          1,
+          16,
+          0.933,
+          {
+            "white": 188.0
+          }
+        ],
+        [
+          "renderer",
+          2,
+          0,
+          0.999,
+          {
+            "grey": 56.0
+          }
+        ],
+        [
+          "primary-overlay",
+          2,
+          0,
+          0.92,
+          {
+            "grey": 45.0
+          }
+        ],
+        [
+          "renderer",
+          3,
+          4,
+          0.999,
+          {
+            "grey": 57.0
+          }
+        ],
+        [
+          "primary-overlay",
+          3,
+          4,
+          0.927,
+          {
+            "grey": 45
+          }
+        ]
+      ],
+      "errors": [],
+      "factoryNavigation": {
+        "setting": 3,
+        "pid": "",
+        "amapPid": "4304",
+        "owned": true
+      }
+    },
+    "baidu-4": {
+      "frames": 211,
+      "navStatus": 1,
+      "laneIconIds": [
+        1,
+        1,
+        30,
+        15
+      ],
+      "similarities": [
+        [
+          "renderer",
+          1,
+          1,
+          0.999,
+          {
+            "grey": 56.0
+          }
+        ],
+        [
+          "primary-overlay",
+          1,
+          1,
+          0.922,
+          {
+            "grey": 45.0
+          }
+        ],
+        [
+          "renderer",
+          2,
+          1,
+          0.999,
+          {
+            "grey": 56.0
+          }
+        ],
+        [
+          "primary-overlay",
+          2,
+          1,
+          0.913,
+          {
+            "grey": 44.0
+          }
+        ],
+        [
+          "renderer",
+          3,
+          30,
+          1.0,
+          {
+            "grey": 56.0,
+            "white": 235.0
+          }
+        ],
+        [
+          "primary-overlay",
+          3,
+          30,
+          0.944,
+          {
+            "grey": 45.0,
+            "white": 188.0
+          }
+        ],
+        [
+          "renderer",
+          4,
+          15,
+          0.999,
+          {
+            "white": 236.0
+          }
+        ],
+        [
+          "primary-overlay",
+          4,
+          15,
+          0.943,
+          {
+            "white": 189.0
+          }
+        ]
+      ],
+      "errors": [],
+      "factoryNavigation": {
+        "setting": 3,
+        "pid": "",
+        "amapPid": "4304",
+        "owned": true
+      }
+    },
+    "baidu-5": {
+      "frames": 57,
+      "navStatus": 1,
+      "laneIconIds": [
+        1,
+        30,
+        15,
+        3
+      ],
+      "similarities": [
+        [
+          "renderer",
+          1,
+          1,
+          0.999,
+          {
+            "grey": 56.0
+          }
+        ],
+        [
+          "primary-overlay",
+          1,
+          1,
+          0.922,
+          {
+            "grey": 45.0
+          }
+        ],
+        [
+          "renderer",
+          2,
+          30,
+          1.0,
+          {
+            "grey": 56.0,
+            "white": 235.0
+          }
+        ],
+        [
+          "primary-overlay",
+          2,
+          30,
+          0.948,
+          {
+            "grey": 45.0,
+            "white": 188.0
+          }
+        ],
+        [
+          "renderer",
+          3,
+          15,
+          0.999,
+          {
+            "white": 235.0
+          }
+        ],
+        [
+          "primary-overlay",
+          3,
+          15,
+          0.945,
+          {
+            "white": 188.0
+          }
+        ],
+        [
+          "renderer",
+          4,
+          3,
+          0.999,
+          {
+            "grey": 57.0
+          }
+        ],
+        [
+          "primary-overlay",
+          4,
+          3,
+          0.937,
+          {
+            "grey": 46.0
+          }
+        ]
+      ],
+      "errors": [],
+      "factoryNavigation": {
+        "setting": 3,
+        "pid": "",
+        "amapPid": "4304",
+        "owned": true
+      }
+    },
+    "baidu-end": {
+      "frames": 225,
+      "navStatus": 0,
+      "laneIconIds": [],
+      "similarities": [],
+      "errors": [],
+      "factoryNavigation": {
+        "setting": 1,
+        "pid": "7439",
+        "amapPid": "4304",
+        "owned": false
+      }
+    },
+    "amap-active": {
+      "frames": 243,
+      "navStatus": 1,
+      "laneIconIds": [],
+      "similarities": [],
+      "errors": [],
+      "factoryNavigation": {
+        "setting": 3,
+        "pid": "",
+        "amapPid": "4304",
+        "owned": true
+      }
+    },
+    "amap-end": {
+      "frames": 288,
+      "navStatus": 0,
+      "laneIconIds": [],
+      "similarities": [],
+      "errors": [],
+      "factoryNavigation": {
+        "setting": 1,
+        "pid": "7715",
+        "amapPid": "4304",
+        "owned": false
+      }
+    }
+  },
+  "errors": []
+}

@@ -6,8 +6,7 @@ import java.util.concurrent.Executors
 /**
  * Publishes the cluster's navigation *presentation* state over the DIM broker: whether the phone is
  * the navigation source (`ihu/info/phoneprojection`) and whether a navigation is running
- * (`ihu/events/navigation/ongoing`). The live distance is handled separately by
- * [EcarxDimDistanceGuard]; both speak bytes through [EcarxMqtt].
+ * (`ihu/events/navigation/ongoing`), using [EcarxMqtt] for packet framing.
  */
 internal object EcarxProjectionChannel {
     private const val TAG = "DiPlay-ECARX-PROJ"

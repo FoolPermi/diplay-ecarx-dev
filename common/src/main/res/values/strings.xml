@@ -894,7 +894,7 @@
     <string name="settings_hotspot_interface_description">Only for head units that run their hotspot on a network interface Android does not report as a Wi-Fi hotspot, for example eth0.3 on some Geely, Lynk &amp; Co and other Qualcomm units. Leave empty to find it automatically.</string>
     <string name="ecarx_navigation">ECARX navigation</string>
     <string name="ecarx_navigation_on_instrument_cluster">Navigation on the instrument cluster</string>
-    <string name="ecarx_navigation_on_instrument_cluster_description">Show CarPlay turn arrows, distance, ETA and street names on the ECARX instrument cluster through the head unit\'s DIM interface.</string>
+    <string name="ecarx_navigation_on_instrument_cluster_description">Show CarPlay directions on the instrument cluster. During guidance, DiPlay pauses factory navigation. On 753 units, you may need to add the home screen navigation card again afterward.</string>
     <string name="ecarx_instrument_cluster_projection">Mirror the full screen to the instrument cluster</string>
     <string name="ecarx_instrument_cluster_projection_description">Mirror the centre screen onto the instrument cluster. This covers the cluster navigation and media cards. Leave it off to keep turn arrows, lane guidance and song information visible.</string>
     <string name="ecarx_cluster_call_rejected">The head unit refused that call. It needs the system signature and the DIM permissions to be granted.</string>

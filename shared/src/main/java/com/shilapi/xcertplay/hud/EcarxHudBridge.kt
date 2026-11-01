@@ -186,6 +186,7 @@ internal object EcarxHudBridge {
 
     private var lastPushed: EcarxDimApi.Guidance? = null
     private var lanes: List<EcarxDimApi.Lane>? = null
+    private val lanesByIndex = mutableMapOf<Int, List<EcarxDimApi.Lane>?>()
     private var lastLanePushed: List<EcarxDimApi.Lane>? = null
     /** Which arrow channel the last frame left on, so the report prints the changes and not the ticks. */
     private var lastArrowChannel: String? = null
@@ -229,6 +230,10 @@ internal object EcarxHudBridge {
         override fun onDisplayChanged(displayId: Int) = Unit
     }
 
+    fun recoverFactoryNavigationIfIdle(app: Context) = synchronized(lock) {
+        if (lastPushed == null) report(EcarxFactoryNavigationRestore.restoreIfPausedByUs(app))
+    }
+
     /** Resolves the DIM handles once per process. Safe to call from any thread; idempotent. */
     fun initialize(appContext: Context) = synchronized(lock) {
         if (context != null) return@synchronized
@@ -239,8 +244,6 @@ internal object EcarxHudBridge {
             report("ECARX identity absent, output disabled: ${EcarxCapabilities.describe(app)}")
             return@synchronized
         }
-        // Migration: re-enable ecarx.naviservice if an older build paused it (see the restore doc).
-        report("factory navigation ${EcarxFactoryNavigationRestore.restoreIfPausedByUs(app)}")
         // Read the previous request for the startup reset below, not to restore a mirror.
         presentationWanted = EcarxOutputSettings.presentationSwitch(app)
         val pending = EcarxOutputSettings.presentationReleasePending(app)
@@ -286,7 +289,6 @@ internal object EcarxHudBridge {
         reportSink = sink
         EcarxDimApi.attachReport(sink)
         EcarxProjectionChannel.attachReport(sink)
-        EcarxDimDistanceGuard.attachReport(sink)
         unreported.forEach(sink)
         unreported.clear()
     }
@@ -380,19 +382,22 @@ internal object EcarxHudBridge {
     fun onFrame(frame: Iap2Frame, source: String = "unspecified") = synchronized(lock) {
         if (!ecarxDetected) return@synchronized
         if (frame.messageId == 0x5204) {
-            val parsed = Iap2LaneGuidance.parse(frame.payload) ?: run {
+            val update = Iap2LaneGuidance.parseUpdate(frame.payload) ?: run {
                 return@synchronized
             }
             val app = context
-            if (parsed.isEmpty() || app == null || !EcarxOutputSettings.enabled(app) ||
-                !EcarxOutputSettings.laneGuidanceEnabled(app) || route.current() == null || navi == null) {
+            if (update.lanes.isEmpty() || app == null || !EcarxOutputSettings.enabled(app) ||
+                !EcarxOutputSettings.laneGuidanceEnabled(app)) {
+                lanesByIndex.clear()
                 lanes = null
             } else {
-                val mapped = parsed.map { lane ->
+                val mapped = update.lanes.map { lane ->
                     EcarxLaneIcon.forLane(lane)?.let { EcarxDimApi.Lane(lane.index + 1, it) }
                 }
-                lanes = if (mapped.all { it != null }) mapped.filterNotNull() else null
-                if (lanes == null) report("DIM lane unsupported; old strip withdrawn")
+                lanesByIndex[requireNotNull(update.index)] =
+                    if (mapped.all { it != null }) mapped.filterNotNull() else null
+                report("DIM lane cached index=${update.index} count=${update.lanes.size} " +
+                    "current=${route.laneGuidanceIndex ?: "none"} guidance=${route.current() != null}")
             }
             pushLaneLocked(false)
             return@synchronized
@@ -422,13 +427,16 @@ internal object EcarxHudBridge {
         route.clear() // Stop the keepalive from restoring guidance after cleanup.
         if (lastPushed != null) endLocked("reason=clear-or-session-stop") else {
             clearLanesLocked()
-            EcarxDimDistanceGuard.stopGuarding()
+            context?.let { report(EcarxFactoryNavigationRestore.restoreIfPausedByUs(it)) }
         }
     }
 
     fun settingsChanged() = synchronized(lock) {
         val app = context ?: return@synchronized
-        if (!EcarxOutputSettings.laneGuidanceEnabled(app)) lanes = null
+        if (!EcarxOutputSettings.laneGuidanceEnabled(app)) {
+            lanesByIndex.clear()
+            lanes = null
+        }
         pushLaneLocked(false)
     }
 
@@ -611,11 +619,14 @@ internal object EcarxHudBridge {
         if (!force && guidance == lastPushed) return
         val firstFrame = lastPushed == null
 
+        if (firstFrame) report(EcarxFactoryNavigationRestore.pauseForGuidance(app))
+
         // Order matches the toolkit: the aggregate payload first, then the discrete fields.
         val result = EcarxDimApi.updateNavigationInfo(naviRef, guidance)
         if (!result.ok) {
             report("updateNavigationInfo failed next=${maneuver.distanceMeters}m: ${result.reason}")
-            if (!firstFrame) endLocked("reason=aggregate-failed")
+            if (firstFrame) report(EcarxFactoryNavigationRestore.restoreIfPausedByUs(app))
+            else endLocked("reason=aggregate-failed")
             return
         }
         if (firstFrame) {
@@ -636,13 +647,6 @@ internal object EcarxHudBridge {
         val eta = maneuver.arrivalEpochSeconds?.let { EcarxDimApi.updateEta(naviRef, it) }
         maneuver.road.takeIf { it.isNotEmpty() }
             ?.let { EcarxDimApi.updateNextGuidancePointName(naviRef, it) }
-        // Keep the DIM service's live distance as ours: the factory app writes the same MQTT topic
-        // from its own NaviInteraction and would otherwise flip the cluster back to 1 m / 0 m.
-        EcarxDimDistanceGuard.guardGuidance(
-            nextMeters = maneuver.distanceMeters,
-            remainingMeters = maneuver.remainingMeters?.toInt(),
-            road = maneuver.road,
-        )
         if (EcarxOutputSettings.turnArrowExperimental(app)) {
             // The arrow goes to the cluster's own navigation page, which the head unit renders as
             // soon as the 仪表投屏 switch is on — so nothing here has to claim the phone as the
@@ -703,11 +707,14 @@ internal object EcarxHudBridge {
 
     private fun pushLaneLocked(force: Boolean) {
         val naviRef = navi ?: return
+        // 0x5204 is prefetched for several junctions before the first live 0x5201 cursor.
+        lanes = if (route.current() == null || route.laneGuidanceShowing == false) null else route.laneGuidanceIndex?.let { lanesByIndex[it] }
+            ?: if (route.laneGuidanceIndex == null && lanesByIndex.size == 1) lanesByIndex.values.single() else null
         val wanted = lanes
         if (wanted == null) {
             if (lastLanePushed != null) {
                 val result = EcarxDimApi.clearLaneInfo(naviRef)
-                report("DIM lane clear ${result.reason}")
+                report("DIM lane clear ${result.reason} showing=${route.laneGuidanceShowing}")
                 if (result.ok) lastLanePushed = null
             }
             return
@@ -715,11 +722,13 @@ internal object EcarxHudBridge {
         if (lastPushed == null || route.current() == null || !EcarxOutputSettings.laneGuidanceEnabled(context ?: return)) return
         if (!force && wanted == lastLanePushed) return
         val result = EcarxDimApi.updateLaneInfo(naviRef, wanted)
-        report("DIM lane ${result.reason}")
+        report("DIM lane ${result.reason} index=${route.laneGuidanceIndex ?: "unspecified"} " +
+            "showing=${route.laneGuidanceShowing ?: "unspecified"}")
         if (result.ok) lastLanePushed = wanted
     }
 
     private fun clearLanesLocked(force: Boolean = false) {
+        lanesByIndex.clear()
         if (!force && lanes == null && lastLanePushed == null) return
         lanes = null
         val naviRef = navi ?: return
@@ -761,12 +770,10 @@ internal object EcarxHudBridge {
     }
 
     private fun endLocked(reason: String) {
-        // Stop correcting before the clear writes, so a queued correction cannot re-assert the old
-        // distance after this method publishes zero.
-        EcarxDimDistanceGuard.stopGuarding()
         try {
             lastGuidanceEnd = "$reason elapsedMs=${SystemClock.elapsedRealtime()}"
             lanes = null
+            lanesByIndex.clear()
             val naviRef = navi
             if (naviRef != null) {
                 // The recovered SDK's Stop only clears lanes/exits; idle resets its cached active state for the next start.
@@ -812,7 +819,7 @@ internal object EcarxHudBridge {
                 clusterPresentationRequested?.invoke(false)
             }
         } finally {
-            EcarxDimDistanceGuard.stopGuarding()
+            context?.let { report(EcarxFactoryNavigationRestore.restoreIfPausedByUs(it)) }
         }
     }
 
@@ -1111,7 +1118,7 @@ internal object EcarxHudBridge {
         append(" presentation=").append(EcarxOutputSettings.presentationSwitch(context))
         append(" arrowExperimental=").append(EcarxOutputSettings.turnArrowExperimental(context))
         append(" media=").append(EcarxOutputSettings.mediaEnabled(context))
-        append(" navGuard=[").append(EcarxDimDistanceGuard.state()).append(']')
+        append(" factoryNavigation=[").append(EcarxFactoryNavigationRestore.state(context)).append(']')
         synchronized(lock) {
             append(" wired=").append(ecarxDetected)
             append(" dim=").append(dim != null)

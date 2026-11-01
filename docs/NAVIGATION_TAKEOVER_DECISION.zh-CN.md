@@ -27,15 +27,15 @@
 ## 实现要求
 
 - **停包**：不照搬 HY 的 `Runtime.exec("pm disable ...")`（DCYTools 的隐式 shell 身份路径），直接调用 `PackageManager.setApplicationEnabledSetting("ecarx.naviservice", DISABLED_USER, 0)`，前后读回包状态校验并记日志。台架重放已验证的正是 `DISABLED_USER`（enabled=3）。
-- **恢复**：设回 `COMPONENT_ENABLED_STATE_DEFAULT` → 延迟 2 秒 → `startForegroundService` 启动 NaviService（Android 9 普通后台 startservice 会被拒绝，台架已证实）→ 校验进程存活。
+- **恢复**：恢复停包前的状态（通常为 `COMPONENT_ENABLED_STATE_DEFAULT`，显式启用的包仍为 `ENABLED`）→ 延迟 2 秒 → `startForegroundService` 启动 NaviService（Android 9 普通后台 startservice 会被拒绝，台架已证实）→ 用 `REAL_GET_TASKS` 校验原厂进程存活，确认后清除标记。原先已被用户禁用的包保持原状。
 - **异常退出恢复（HY 未做，必须补）**：停包前写持久标记，恢复成功后清除；应用启动与投屏会话结束时检查"标记存在且无活动导航"即自动恢复原厂包。
 - **守护停用**：停包成功时不得启动 `EcarxDimDistanceGuard`；两条通道不并行。若停包失败，按"可检测错误"处理（告警 + 记录），不静默降级到纠偏。
 
-## 落地前待验证
+## v109 验证结果
 
-1. 生产 App 内（非 ADB）执行停包/恢复的完整链路。
-2. 异常退出（强杀/崩溃）后的原厂状态自动恢复。
-3. 同手机/同地图/同路线 + 仪表录像的实车对照：无 1 米、退出导航后原厂导航可用（卡片手工重加一次）。
+Android 9 模拟器授予测试版 DiPlay 与平台签名有关的两项权限，通过应用自身执行停包与恢复，16 个生命周期检查点通过。到达、取消和断开都会恢复原厂服务。取消后 547 毫秒再次开始导航，旧的延迟任务未打断新路线。原本由用户禁用的包在退出后仍保持禁用。导航时强停 DiPlay 会保留停包状态，下一次正常打开 DiPlay 后恢复原厂服务并清除标记。
+
+苹果地图两段（326、280 帧）、百度地图一段（735 帧）、高德地图一段（531 帧），合计 1,872 帧，12 个模拟仪表检查点全部通过。苹果验证五车道与路口隐藏后恢复，百度验证三个路口的车道切换，高德在 496 米处显示路名和距离。该段高德输入没有车道帧，尚不能验证其车道显示。各轮导航结束后原厂进程均恢复。物理仪表效果仍待同路段实车录像验证。[地图回放结果](verification/navigation-v109/maps.json) · [停包与恢复检查](verification/navigation-v109/lifecycle.json)
 
 ## 证据索引（工作区 lyno-carplay）
 

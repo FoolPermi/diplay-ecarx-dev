@@ -858,7 +858,7 @@
     <string name="ecarx_media_on_instrument_cluster_description">透過億咖通 ECARX MediaCenter 輸出媒體資訊，與導航獨立，需要相容韌體及權限。</string>
     <string name="ecarx_navigation">億咖通導航</string>
     <string name="ecarx_navigation_on_instrument_cluster">儀表導航</string>
-    <string name="ecarx_navigation_on_instrument_cluster_description">透過車機 DIM 介面，在億咖通儀表上顯示 CarPlay 的轉向箭頭、距離、預計到達時間與路名。</string>
+    <string name="ecarx_navigation_on_instrument_cluster_description">在儀表上顯示 CarPlay 轉向、距離、預計到達時間與路名。引導期間暫停原廠導航服務；753 車機的原廠桌面導航卡片可能需要手動重新加入。</string>
     <string name="ecarx_sw_key_action_answer">接聽電話</string>
     <string name="ecarx_sw_key_action_hangup">掛斷電話</string>
     <string name="ecarx_sw_key_action_next">下一曲</string>

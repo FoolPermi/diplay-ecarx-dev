@@ -5,18 +5,33 @@ import com.shilapi.xcertplay.iap2.message.LaneGuidanceLane
 /** IDs observed in the ECARX lane assets and the linked Geely lane mapping. */
 internal object EcarxLaneIcon {
     fun forLane(lane: LaneGuidanceLane): Int? {
-        if (lane.status != 0 && lane.status != 2) return null
-        val directions = (if (lane.angles.isNotEmpty()) lane.angles else listOfNotNull(lane.highlightAngle)).toSet()
+        if (lane.status !in 0..2) return null
+        val highlight = lane.highlightAngle.takeIf { lane.status != 0 }
+        val directions = if (lane.angles.isEmpty()) setOfNotNull(lane.highlightAngle)
+            else (lane.angles + listOfNotNull(highlight)).toSet()
         val base = when (directions) {
             setOf(0) -> 0
             setOf(-90) -> 1
             setOf(-45), setOf(-90, 0) -> 2
             setOf(90) -> 3
             setOf(45), setOf(0, 90) -> 4
+            setOf(-180) -> 5
             setOf(-90, 90) -> 6
             setOf(-90, 0, 90) -> 7
             else -> return null
         }
-        return base + if (lane.recommended) 15 else 0
+        // The two-tone OEM icons retain the other paths while lighting only the selected one.
+        if (directions.size > 1 && highlight != null) return when (base) {
+            2 -> if (highlight == 0) 30 else 31
+            4 -> if (highlight == 0) 32 else 33
+            6 -> if (highlight == -90) 34 else 35
+            7 -> when (highlight) {
+                0 -> 36
+                -90 -> 37
+                else -> 38
+            }
+            else -> null
+        }
+        return base + if (highlight != null || lane.recommended) 15 else 0
     }
 }

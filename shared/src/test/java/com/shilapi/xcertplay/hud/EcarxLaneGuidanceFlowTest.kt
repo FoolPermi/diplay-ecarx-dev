@@ -34,10 +34,10 @@ class EcarxLaneGuidanceFlowTest {
     class NaviWithStatus : NaviFixture() {
         fun notifyNavigationStatus(status: Int) = FixtureLog.capture("notifyNavigationStatus", "status", status)
     }
-    /** Proves guidance never disables the factory package (which also hosts its desktop widgets). */
+    /** Every DIM frame, including the final idle update, must precede factory service restoration. */
     class NaviCheckingFactory(val context: Context) : NaviFixture() {
         override fun updateNavigationInfo(info: INaviInteraction.INavigationInfo) {
-            assertNotEquals(PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER,
+            assertEquals(PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER,
                 context.packageManager.getApplicationEnabledSetting(FACTORY_PACKAGE))
             super.updateNavigationInfo(info)
         }
@@ -52,7 +52,7 @@ class EcarxLaneGuidanceFlowTest {
         shadowOf(context).grantPermissions(EcarxHicarControl.PERMISSION)
     }
 
-    /** The factory package must never be left disabled; its desktop widgets depend on it. */
+    /** After an exit the factory package is immediately available to Android again. */
     private fun assertFactoryRestored() {
         assertNotEquals(PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER,
             context.packageManager.getApplicationEnabledSetting(FACTORY_PACKAGE))
@@ -149,7 +149,7 @@ class EcarxLaneGuidanceFlowTest {
         assertEquals(listOf(
             mapOf("number" to 1, "iconId" to 1, "bitmap" to null),
             mapOf("number" to 2, "iconId" to 0, "bitmap" to null),
-            mapOf("number" to 3, "iconId" to 15, "bitmap" to null),
+            mapOf("number" to 3, "iconId" to 33, "bitmap" to null),
         ), calls("updateLaneInfo").single().payload["lanes"])
         assertEquals(EcarxCapabilities.LANE_INFO, calls("updateLaneInfo").single().payload["componentType"])
         NavigationOutputs.onFrame(frame)
@@ -174,6 +174,87 @@ class EcarxLaneGuidanceFlowTest {
         NavigationOutputs.ecarxChanged(context)
         awaitOutputWorker()
         assertNull(calls("updateLaneInfo").last().payload["lanes"])
+    }
+
+    @Test fun hiddenLanesStayCachedUntilThePhoneShowsThemAgain() {
+        initialize()
+        send(0x5204) {
+            u16(0, 42); u16(1, 0); group(2) { u16(0, 0); u8(1, 2); i16(2, -90) }
+        }
+        maneuver()
+        send(0x5201) {
+            u8(1, 6); u16List(0x0d, listOf(7)); u32(0x0a, 90); u16(0x10, 0); u8(0x12, 0)
+        }
+        repeat(5) { tick() }
+        assertTrue(calls("updateLaneInfo").isEmpty())
+        send(0x5201) { u8(0x12, 1) }
+        assertEquals(listOf(mapOf("number" to 1, "iconId" to 16, "bitmap" to null)),
+            calls("updateLaneInfo").single().payload["lanes"])
+        send(0x5201) { u8(0x12, 0) }
+        assertNull(calls("updateLaneInfo").last().payload["lanes"])
+        send(0x5204) {
+            u16(0, 42); u16(1, 1); group(2) { u16(0, 0); u8(1, 2); i16(2, 90) }
+        }
+        send(0x5201) { u16(0x10, 1) }
+        repeat(5) { tick() }
+        assertNull(calls("updateLaneInfo").last().payload["lanes"])
+        send(0x5201) { u8(0x12, 1) }
+        assertEquals(listOf(mapOf("number" to 1, "iconId" to 18, "bitmap" to null)),
+            calls("updateLaneInfo").last().payload["lanes"])
+        send(0x5201) { u8(1, 2) }
+        assertNull(calls("updateLaneInfo").last().payload["lanes"])
+        assertNull(route.laneGuidanceShowing)
+    }
+
+    @Test fun prefetchedLanesWaitForGuidanceAndFollowTheirOwnCursor() {
+        initialize()
+        send(0x5204) {
+            u16(0, 42); u16(1, 0); group(2) { u16(0, 0); u8(1, 2); i16(2, -90) }
+        }
+        send(0x5204) {
+            u16(0, 42); u16(1, 1); group(2) { u16(0, 0); u8(1, 2); i16(2, 90) }
+        }
+        repeat(5) { tick() }
+        assertTrue(calls("updateLaneInfo").isEmpty())
+        // Apple Maps sends this initial NoRouteSet after its prefetch burst.
+        send(0x5201) { u8(1, 0) }
+        maneuver()
+        send(0x5201) { u8(1, 6); u16List(0x0d, listOf(7)); u32(0x0a, 90); u16(0x10, 0) }
+        assertEquals(listOf(mapOf("number" to 1, "iconId" to 16, "bitmap" to null)),
+            calls("updateLaneInfo").single().payload["lanes"])
+        send(0x5201) { u16(0x10, 1) }
+        assertEquals(listOf(mapOf("number" to 1, "iconId" to 18, "bitmap" to null)),
+            calls("updateLaneInfo").last().payload["lanes"])
+        send(0x5201) { u16(0x10, 2) }
+        assertNull(calls("updateLaneInfo").last().payload["lanes"])
+        send(0x5201) { u16(0x10, 0) }
+        assertNotNull(calls("updateLaneInfo").last().payload["lanes"])
+        send(0x5201) { u8(1, 2) }
+        assertNull(calls("updateLaneInfo").last().payload["lanes"])
+        val afterEnd = calls("updateLaneInfo").size
+        maneuver(); guidance()
+        assertEquals(afterEnd, calls("updateLaneInfo").size)
+    }
+
+    @Test fun pendingLanesAreWithdrawnOnDisconnectExplicitClearAndDisabledSetting() {
+        initialize()
+        for (clear in listOf<() -> Unit>(
+            { EcarxHudBridge.clear() },
+            { send(0x5204) {} },
+            {
+                EcarxOutputSettings.setLaneGuidanceEnabled(context, false)
+                EcarxHudBridge.settingsChanged()
+                EcarxOutputSettings.setLaneGuidanceEnabled(context, true)
+            },
+        )) {
+            send(0x5204) {
+                u16(0, 42); u16(1, 0); group(2) { u16(0, 0); u8(1, 2); i16(2, 90) }
+            }
+            clear()
+            maneuver(); guidance()
+            assertTrue(calls("updateLaneInfo").none { it.payload["lanes"] != null })
+            EcarxHudBridge.clear()
+        }
     }
 
     @Test fun dimCreationFromWorkerAndTickerRunsOnMainLooper() {
@@ -440,7 +521,8 @@ class EcarxLaneGuidanceFlowTest {
         repeat(5) { tick() }
         assertTrue(EcarxHudBridge.isActive())
         assertTrue(panelRequests.last())
-        assertNotEquals(PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER,
+        NavigationOutputs.onAppOpened(context)
+        assertEquals(PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER,
             context.packageManager.getApplicationEnabledSetting(FACTORY_PACKAGE))
         assertTrue(route.diagnosticState().contains("reason=active"))
         assertTrue(route.diagnosticState().contains("sessionActive=true"))
@@ -546,9 +628,9 @@ class EcarxLaneGuidanceFlowTest {
         assertTrue(calls("setPresentationToDimSwitch").isEmpty())
     }
 
-    @Test fun guidanceNeverDisablesFactoryNavigationAcrossAllExitPaths() {
+    @Test fun guidancePausesFactoryNavigationBeforeFirstPublishAndRestoresAcrossAllExitPaths() {
         installFactoryNavigation(); initialize()
-        // UpdateNavigationInfo itself asserts the factory package is never DISABLED_USER.
+        // The DIM fixture checks the package state at the instant of publication.
         set("navi", NaviCheckingFactory(context))
         repeat(5) { cycle ->
             maneuver(); guidance()

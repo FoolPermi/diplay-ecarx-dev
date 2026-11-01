@@ -383,9 +383,6 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         // every launch, not only after a boot or an authentication failure.
         CarBluetoothProfileGuard.recoverIfStale(this)
         NavigationOutputs.onAppOpened(applicationContext)
-        // One-time: an older build paused ecarx.naviservice during guidance; put it back on open so
-        // the desktop navigation widgets can be re-added without a manual `pm enable`.
-        Log.i("DiPlay-ECARX", com.shilapi.xcertplay.hud.EcarxFactoryNavigationRestore.restoreIfPausedByUs(applicationContext))
         pendingCarHotspotSetup = savedInstanceState?.getBoolean("pending_car_hotspot") ?: false
         settingsCategory = savedInstanceState?.getString("settings_category")
             ?.let { runCatching { SettingsCategory.valueOf(it) }.getOrNull() }

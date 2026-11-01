@@ -45,8 +45,10 @@
       guard reports instead of changing anything.
     -->
     <uses-permission android:name="android.permission.BLUETOOTH_PRIVILEGED" />
-    <!-- The 820A factory HiCar switch is available only when this platform permission is granted. -->
+    <!-- Factory HiCar control and navigation takeover require this platform permission. -->
     <uses-permission android:name="android.permission.CHANGE_COMPONENT_ENABLED_STATE" />
+    <!-- Android 9 otherwise hides the factory navigation process from restart verification. -->
+    <uses-permission android:name="android.permission.REAL_GET_TASKS" />
 
     <uses-feature
         android:name="android.hardware.usb.host"

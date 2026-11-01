@@ -49,6 +49,10 @@ internal class RouteGuidanceState(
     private val maneuvers = mutableMapOf<Int, Maneuver>()
     private var routeActive = false
     private var activeIndex = -1
+    var laneGuidanceIndex: Int? = null
+        private set
+    var laneGuidanceShowing: Boolean? = null
+        private set
     private var distanceMeters = 0
     private var currentRoad = ""
     private var arrivalEpochSeconds: Long? = null
@@ -87,6 +91,8 @@ internal class RouteGuidanceState(
         endReason = reason
         routeActive = false
         activeIndex = -1
+        laneGuidanceIndex = null
+        laneGuidanceShowing = null
         distanceMeters = 0
         currentRoad = ""
         arrivalEpochSeconds = null
@@ -169,6 +175,8 @@ internal class RouteGuidanceState(
                     listPresent = true
                     if (valueLength >= 2) firstManeuver = u16(data, value)
                 }
+                type == 0x10 && valueLength == 2 -> laneGuidanceIndex = u16(data, value)
+                type == 0x12 && valueLength == 1 -> laneGuidanceShowing = data[value] != 0.toByte()
             }
         }
 

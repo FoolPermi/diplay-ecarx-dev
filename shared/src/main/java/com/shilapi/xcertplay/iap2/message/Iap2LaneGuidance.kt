@@ -13,10 +13,14 @@ data class LaneGuidanceLane(
     val recommended: Boolean get() = status == 2
 }
 
+data class LaneGuidanceUpdate(val index: Int?, val lanes: List<LaneGuidanceLane>)
+
 object Iap2LaneGuidance {
     /** Null means malformed; an empty body alone means an explicit clear. */
-    fun parse(payload: ByteArray): List<LaneGuidanceLane>? {
-        if (payload.isEmpty()) return emptyList()
+    fun parse(payload: ByteArray): List<LaneGuidanceLane>? = parseUpdate(payload)?.lanes
+
+    fun parseUpdate(payload: ByteArray): LaneGuidanceUpdate? {
+        if (payload.isEmpty()) return LaneGuidanceUpdate(null, emptyList())
         val outer = runCatching { Iap2ParameterList.parse(payload) }.getOrNull() ?: return null
         val component = outer.first(0)?.payload ?: return null
         if (component.size != 2 || outer.first(1)?.payload?.size != 2) return null
@@ -43,6 +47,6 @@ object Iap2LaneGuidance {
             }
             lanes += LaneGuidanceLane(Iap2WireCodec.readU16(index), Iap2WireCodec.readU8(status), angles, highlight)
         }
-        return lanes.sortedBy { it.index }
+        return LaneGuidanceUpdate(Iap2WireCodec.readU16(outer.first(1)!!.payload), lanes.sortedBy { it.index })
     }
 }
