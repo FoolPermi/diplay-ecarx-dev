@@ -20,6 +20,25 @@ class HySiriKeysTest {
         app.getSharedPreferences("diplay_media_session", 0).edit().clear().commit()
     }
 
+    @Test @Config(sdk = [28]) fun passiveInputAcceptsOnlyTheSelectedSystemKeyDownSinceStart() {
+        val line = "I/Input   ( 1000: 2969): injectKeyEvent: KeyEvent { action=ACTION_DOWN, " +
+            "keyCode=KEYCODE_NUMPAD_MULTIPLY, scanCode=0, metaState=0, flags=0x0, repeatCount=0, " +
+            "eventTime=194485, downTime=194485, deviceId=-1, source=0x101 }"
+        for ((group, codes) in listOf(HySiriKey.TOGGLE_155_156 to listOf("KEYCODE_NUMPAD_MULTIPLY", "KEYCODE_NUMPAD_SUBTRACT"),
+            HySiriKey.TOGGLE_312_303 to listOf("312", "303"))) {
+            for (code in codes) {
+                val input = line.replace("KEYCODE_NUMPAD_MULTIPLY", code)
+                assertEquals(194485L, HySiriInputLog.parse(input, 194485, group))
+                assertNull(HySiriInputLog.parse(input, 194486, group))
+                assertNull(HySiriInputLog.parse(input, 0, HySiriKey.entries.single { it != group }))
+            }
+        }
+        for ((from, to) in listOf("1000:" to "10001:", "ACTION_DOWN" to "ACTION_UP",
+            "repeatCount=0" to "repeatCount=1", "deviceId=-1" to "deviceId=1")) {
+            assertNull(HySiriInputLog.parse(line.replace(from, to), 0, HySiriKey.TOGGLE_155_156))
+        }
+    }
+
     @Test fun eitherCodeInTheSelectedPairTriggersOnceWithoutLearningDeviceOrScanCodes() {
         for (pair in HySiriKey.entries) {
             MediaSessionSettings.setHySiriKey(app, pair)

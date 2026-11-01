@@ -22,7 +22,7 @@ internal enum class HySiriKey(val value: Int, val label: String, vararg val code
 }
 
 internal object MediaSessionSettings {
-    private const val PREFS = "diplay_media_session"
+    const val PREFS = "diplay_media_session"
     private const val KEY_VOICE_PRESS = "voice_key_press"
 
     fun wheelSiriEnabled(context: Context): Boolean =

@@ -5,6 +5,9 @@ import com.shilapi.xcertplay.mediacenter.MediaCenterSessionEngine
 import com.shilapi.xcertplay.mediacenter.EcarxMediaCenterTransport
 import java.util.concurrent.TimeUnit
 import android.content.Context
+import android.content.SharedPreferences
+import android.content.pm.PackageManager
+import android.os.Build
 import android.content.BroadcastReceiver
 import android.content.Intent
 import android.graphics.Bitmap
@@ -63,6 +66,13 @@ internal object CarPlayMediaSession {
     private var initialAlbumRecovery = InitialAlbumRecovery()
     private var initialAlbumRetry: Runnable? = null
     private var controller: CarPlayController? = null
+    private var hyLog: Process? = null
+    private var hyLogGroup: HySiriKey? = null
+    private var hyLogPrefs: SharedPreferences? = null
+    private var lastHyPress = -1L
+    private val hyLogPreferenceChanged = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+        synchronized(this) { refreshHyLogLocked() }
+    }
     private var activePhoneSession: AirPlaySession? = null
     private var connectingPhoneSession: AirPlaySession? = null
     private var session: MediaSession? = null
@@ -110,7 +120,9 @@ internal object CarPlayMediaSession {
             "artistPresent=${!nowPlaying.artist.isNullOrBlank()} artworkDecoded=${artwork != null} " +
             "iphonePlaying=${nowPlaying.playing} elapsedMs=${nowPlaying.elapsedMillis} durationMs=${nowPlaying.durationMillis}\n" +
             "CarPlay media dispatch since process start: attempts=$commandAttempts sent=$commandsSent last=[$lastCommand]\n" +
-            "ECARX voice key: shortPressBroadcastRegistered=${voiceKeyReceiver != null}"
+            "ECARX voice key: shortPressBroadcastRegistered=${voiceKeyReceiver != null}\n" +
+            "HY input log: group=${hyLogGroup?.label ?: "off"} " +
+            "readLogsGranted=${appContext?.checkSelfPermission(android.Manifest.permission.READ_LOGS) == PackageManager.PERMISSION_GRANTED}"
 
     @Synchronized
     fun attach(context: Context, next: CarPlayController) {
@@ -474,6 +486,10 @@ internal object CarPlayMediaSession {
     }
 
     private fun releaseLocked() {
+        hyLogPrefs?.unregisterOnSharedPreferenceChangeListener(hyLogPreferenceChanged)
+        hyLogPrefs = null
+        refreshHyLogLocked()
+        lastHyPress = -1L
         mainHandler.removeCallbacks(retryAndroidActivation)
         androidActivation = "IDLE"
         activePhoneSession = null
@@ -612,6 +628,11 @@ internal object CarPlayMediaSession {
             // A controller may reconnect without being attached to the activity again.
             if (artworkOwner == null) attach(context, expected)
             activePhoneSession = session
+            if (outputMode == MediaSessionMode.ANDROID && Build.VERSION.SDK_INT == 28) {
+                hyLogPrefs = context.getSharedPreferences(MediaSessionSettings.PREFS, Context.MODE_PRIVATE)
+                hyLogPrefs?.registerOnSharedPreferenceChangeListener(hyLogPreferenceChanged)
+                refreshHyLogLocked()
+            }
         }
         updateLocked(mediaAudioActive)
         if (outputMode == MediaSessionMode.ECARX) publishMediaCenter(nowPlaying, artworkUri, "session-active")
@@ -719,12 +740,48 @@ internal object CarPlayMediaSession {
         return requestSiriFromAction()
     }
 
+    private fun refreshHyLogLocked() {
+        val context = appContext ?: return
+        val group = if (hyLogPrefs != null && MediaSessionSettings.wheelSiriEnabled(context) &&
+            context.checkSelfPermission(android.Manifest.permission.READ_LOGS) == PackageManager.PERMISSION_GRANTED)
+            MediaSessionSettings.hySiriKey(context) else null
+        if (group == hyLogGroup) return
+        hyLog?.destroy()
+        hyLog = null
+        hyLogGroup = null
+        if (group == null) return
+        try {
+            hyLog = HySiriInputLog.start(group) { source, time ->
+                synchronized(this) {
+                    if (hyLog === source && controller?.activeAirPlaySession() === activePhoneSession &&
+                        MediaSessionSettings.wheelSiriEnabled(context) && MediaSessionSettings.hySiriKey(context) == group) {
+                        val sent = requestHySiriPress(time)
+                        WheelKeyLog.note("HY background Siri group=${group.label} sent=$sent")
+                    }
+                }
+            }
+            hyLogGroup = group
+        } catch (failure: java.io.IOException) {
+            WheelKeyLog.note("HY background input log unavailable: ${failure.javaClass.simpleName}")
+        }
+    }
+
+    @Synchronized
+    private fun requestHySiriPress(time: Long): Boolean {
+        // The window and logcat carry the same uptime even when one arrives much later.
+        if (time > 0) {
+            if (time <= lastHyPress) return false
+            lastHyPress = time
+        }
+        return requestSiriFromAction()
+    }
+
     internal fun handleHySiriKey(event: KeyEvent, keys: HySiriKeys): Boolean? {
         val context = appContext ?: return null
         return keys.handle(context, event,
             enabled = outputMode == MediaSessionMode.ANDROID && MediaSessionSettings.wheelSiriEnabled(context) &&
                 controller?.activeAirPlaySession() != null,
-            calling = inCall(context), request = ::requestSiriFromAction)
+            calling = inCall(context)) { requestHySiriPress(event.eventTime) }
     }
 
     /** An explicit HY handoff remains valid when DiPlay also listens for the physical voice key. */

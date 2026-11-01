@@ -15,6 +15,8 @@
     <uses-permission android:name="android.permission.TETHER_PRIVILEGED" android:maxSdkVersion="28" tools:ignore="ProtectedPermissions" />
     <!-- Optional Android 9 diagnostic read of system media-session ordering; signature grant only. -->
     <uses-permission android:name="android.permission.MEDIA_CONTENT_CONTROL" android:maxSdkVersion="28" tools:ignore="ProtectedPermissions" />
+    <!-- Observe HY's injected Siri keys without intercepting foreground input on Android 9. -->
+    <uses-permission android:name="android.permission.READ_LOGS" android:maxSdkVersion="28" tools:ignore="ProtectedPermissions" />
     <!-- MediaCenter service authorization is checked at runtime; declaring is not a grant. -->
     <uses-permission android:name="ecarx.oem.permission.OPENAPI_MEDIACENTER_PERMISSION" />
 

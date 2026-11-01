@@ -123,6 +123,22 @@ internal class EcarxVoiceTakeoverTest {
         assertNull(CarPlayMediaSession.handleHySiriKey(KeyEvent(KeyEvent.ACTION_DOWN, 155), HySiriKeys()))
     }
 
+    @Test fun duplicateHyPressKeepsItsIdentityEvenIfDeliveredOutsideTheDebounceWindow() {
+        CarPlayMediaSession.detach(controller)
+        MediaSessionSettings.setMode(app, MediaSessionMode.ANDROID)
+        CarPlayMediaSession.attach(app, controller)
+        `when`(controller.activeAirPlaySession()).thenReturn(phone)
+        val time = SystemClock.uptimeMillis()
+        val down = KeyEvent(time, time, KeyEvent.ACTION_DOWN, 155, 0)
+        CarPlayMediaSession.handleHySiriKey(down, HySiriKeys())
+        SystemClock.sleep(WheelSiriKey.REPEAT_GAP_MILLIS + 1)
+        CarPlayMediaSession.handleHySiriKey(down, HySiriKeys())
+        verify(controller, times(1)).requestSiri()
+        val next = SystemClock.uptimeMillis()
+        CarPlayMediaSession.handleHySiriKey(KeyEvent(next, next, KeyEvent.ACTION_DOWN, 156, 0), HySiriKeys())
+        verify(controller, times(2)).requestSiri()
+    }
+
     @Test fun shortPressIsAbortedAndRequestsSiriOnceAcrossRawCallbacks() {
         `when`(controller.activeAirPlaySession()).thenReturn(phone)
         CarPlayMediaSession.onSessionActive(controller, phone)
