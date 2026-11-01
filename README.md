@@ -46,9 +46,9 @@ Where each feature is enabled, what it needs first, and how to tell it works: [f
 | Automatic connection at startup | **Settings → Connection → Automatic connection**: enable “Open after the car starts” and “Connect when DiPlay opens” |
 | Siri from the wheel | Nothing to set up: the **short press** works once CarPlay is connected, and **Settings → Vehicle → Steering-wheel keys → Wake Siri with the voice key** switches it to a long press |
 
-**If you use HY, disable its steering-wheel control takeover.**
+**In direct mode, disable HY media takeover and its mapping for the same voice key. In HY mode, select the same Siri simulated-key pair in both apps.**
 
-**Wheel voice key:** while CarPlay is connected DiPlay takes over one press of the voice key — the **short press** by default, switchable to the **long press** under **Settings → Vehicle → Steering-wheel keys** — and unbinds when the session ends. The other press stays with the car's own assistant. It requires all of: the head unit identified as Lynk/Geely, media owner set to ECARX, and no call in progress. With HY (media owner = Android) the key goes to HY. Custom key learning is not offered in this version.
+**Wheel Siri:** under **Settings → Vehicle → Steering-wheel keys**, the master switch controls key activation. Direct mode offers short/long press; HY mode offers 155/156 or 312/303, matching the simulated-key option in HY. Siri shortcuts remain available with the key switch off. No key learning is offered. Keys are left alone without an active CarPlay session or during calls. Media integration is under **Settings → Audio**.
 
 Keep “Mirror the full screen to the instrument cluster” off when you only want navigation and song information. After changing settings, reconnect when prompted.
 

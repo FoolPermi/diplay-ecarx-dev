@@ -42,6 +42,7 @@ internal class EcarxVoiceTakeoverTest {
     }
 
     @Before fun setup() {
+        MediaSessionSettings.setWheelSiriEnabled(app, true)
         MediaSessionSettings.setMode(app, MediaSessionMode.ECARX)
         shadowOf(app.packageManager).installPackage(PackageInfo().apply { packageName = "com.ecarx.xiaoka" })
         `when`(controller.nowPlayingSnapshot()).thenReturn(CarPlayNowPlaying())
@@ -55,6 +56,7 @@ internal class EcarxVoiceTakeoverTest {
     }
 
     @After fun cleanup() {
+        MediaSessionSettings.setWheelSiriEnabled(app, true)
         CarPlayMediaSession.detach(controller)
         MediaSessionSettings.setMode(app, MediaSessionMode.ANDROID)
         MediaSessionSettings.setVoiceKeyPress(app, VoiceKeyPress.SHORT)
@@ -70,6 +72,55 @@ internal class EcarxVoiceTakeoverTest {
         send(0)
         assertEquals(1, factoryPresses)
         verify(controller, never()).requestSiri()
+    }
+
+    @Test fun masterOffLeavesBothVoiceGesturesToTheCarButExplicitActionStillWorks() {
+        MediaSessionSettings.setWheelSiriEnabled(app, false)
+        `when`(controller.activeAirPlaySession()).thenReturn(phone)
+        CarPlayMediaSession.onSessionActive(controller, phone)
+        send(0)
+        send(1)
+        assertEquals(2, factoryPresses)
+        assertFalse(CarPlayMediaSession.shouldHandleSiriKey(app))
+        assertFalse(CarPlayMediaSession.onExternalSiriKey(200231))
+        verify(controller, never()).requestSiri()
+        assertTrue(CarPlayMediaSession.requestSiriFromAction())
+        verify(controller, times(1)).requestSiri()
+    }
+
+    @Test fun masterCanBeTurnedBackOnWithoutReconnecting() {
+        `when`(controller.activeAirPlaySession()).thenReturn(phone)
+        CarPlayMediaSession.onSessionActive(controller, phone)
+        MediaSessionSettings.setWheelSiriEnabled(app, false)
+        send(0)
+        verify(controller, never()).requestSiri()
+        MediaSessionSettings.setWheelSiriEnabled(app, true)
+        send(0)
+        assertEquals(1, factoryPresses)
+        verify(controller, times(1)).requestSiri()
+    }
+
+    @Test fun hyVirtualKeysFollowTheActiveBackendAndMasterWhileExplicitActionBypassesIt() {
+        CarPlayMediaSession.detach(controller)
+        MediaSessionSettings.setMode(app, MediaSessionMode.ANDROID)
+        CarPlayMediaSession.attach(app, controller)
+        `when`(controller.activeAirPlaySession()).thenReturn(phone)
+        val keys = HySiriKeys()
+        assertEquals(true, CarPlayMediaSession.handleHySiriKey(KeyEvent(KeyEvent.ACTION_DOWN, 155), keys))
+        assertEquals(true, CarPlayMediaSession.handleHySiriKey(KeyEvent(KeyEvent.ACTION_UP, 155), keys))
+        verify(controller, times(1)).requestSiri()
+        MediaSessionSettings.setWheelSiriEnabled(app, false)
+        assertNull(CarPlayMediaSession.handleHySiriKey(KeyEvent(KeyEvent.ACTION_DOWN, 156), keys))
+        SystemClock.sleep(WheelSiriKey.REPEAT_GAP_MILLIS)
+        assertTrue(CarPlayMediaSession.requestSiriFromAction())
+        verify(controller, times(2)).requestSiri()
+        MediaSessionSettings.setWheelSiriEnabled(app, true)
+        MediaSessionSettings.setMode(app, MediaSessionMode.ECARX)
+        // A saved backend change applies only at the next connection.
+        assertEquals(true, CarPlayMediaSession.handleHySiriKey(KeyEvent(KeyEvent.ACTION_DOWN, 156), keys))
+        CarPlayMediaSession.detach(controller)
+        CarPlayMediaSession.attach(app, controller)
+        assertNull(CarPlayMediaSession.handleHySiriKey(KeyEvent(KeyEvent.ACTION_DOWN, 155), HySiriKeys()))
     }
 
     @Test fun shortPressIsAbortedAndRequestsSiriOnceAcrossRawCallbacks() {

@@ -146,6 +146,7 @@ import kotlin.math.roundToInt
  * Apple devices are discovered by vendor ID; CH341 uses the configured VID/PID below.
  */
 open class CarPlayHostActivity : ComponentActivity() {
+    private val hySiriKeys = HySiriKeys()
     private data class SettingsBaseline(
         val safeAreaRects: MutableMap<DisplaySize, SafeAreaRect?>,
         val customIconBytes: ByteArray?,
@@ -1409,6 +1410,9 @@ open class CarPlayHostActivity : ComponentActivity() {
 
     // Hardware navigation belongs to the iPhone-rendered CarPlay UI, not Android View focus.
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        CarPlayMediaSession.handleHySiriKey(event, hySiriKeys)?.let {
+            return it || super.dispatchKeyEvent(event)
+        }
         if ((CarPlayMediaButton.opensSiri(event.keyCode) || WheelZoomSettings.isSiriKey(this, WheelKey.of(event))) &&
             !CarPlayMediaSession.shouldHandleSiriKey(this)) {
             return super.dispatchKeyEvent(event)
@@ -1555,6 +1559,7 @@ open class CarPlayHostActivity : ComponentActivity() {
             val press = com.shilapi.xcertplay.airplay.EcarxSwKey.resolve(
                 com.shilapi.xcertplay.airplay.EcarxSwKey.prefs(this), event.keyCode)
             if (press != null) {
+                if (press.isSiri && !CarPlayMediaSession.shouldHandleSiriKey(this)) return super.dispatchKeyEvent(event)
                 if (press.isMedia && CarPlayMediaSession.isMediaCenterActive(controller)) return true
                 if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
                     val ctrl = controller
@@ -1625,12 +1630,20 @@ open class CarPlayHostActivity : ComponentActivity() {
                 override fun onKeyPressed(keyCode: Int): Boolean {
                     appendLog("SWKey-CH[intercept] t=${System.currentTimeMillis()} key=$keyCode session=${activeAirPlaySession != null}")
                     if (activeAirPlaySession == null || inCall(this@CarPlayHostActivity)) return false
+                    if ((WheelZoomSettings.isSiriKeyCode(context, keyCode) ||
+                            com.shilapi.xcertplay.airplay.EcarxSwKey.resolve(
+                                com.shilapi.xcertplay.airplay.EcarxSwKey.prefs(context), keyCode)?.isSiri == true) &&
+                        !CarPlayMediaSession.shouldHandleSiriKey(context)) return false
                     if (CarPlayMediaButton.opensSiri(keyCode) && CarPlayMediaSession.ecarxVoiceKeyActive()) return false
                     runOnUiThread { handleEcarxWheelKey(keyCode) }
                     return true
                 }
                 override fun onKeyReleased(keyCode: Int): Boolean =
                     activeAirPlaySession != null && !inCall(this@CarPlayHostActivity) &&
+                        (!(WheelZoomSettings.isSiriKeyCode(context, keyCode) ||
+                            com.shilapi.xcertplay.airplay.EcarxSwKey.resolve(
+                                com.shilapi.xcertplay.airplay.EcarxSwKey.prefs(context), keyCode)?.isSiri == true) ||
+                            CarPlayMediaSession.shouldHandleSiriKey(context)) &&
                         !(CarPlayMediaButton.opensSiri(keyCode) && CarPlayMediaSession.ecarxVoiceKeyActive()) &&
                         (WheelZoomSettings.isSiriKeyCode(context, keyCode) ||
                             com.shilapi.xcertplay.airplay.EcarxSwKey.resolve(
@@ -1689,6 +1702,8 @@ open class CarPlayHostActivity : ComponentActivity() {
     private fun handleEcarxWheelKey(keyCode: Int): Boolean {
         if (!CarPlayMediaSession.managesVehicleKeys()) return false
         if (activeAirPlaySession == null || inCall(this)) return false
+        if ((CarPlayMediaButton.opensSiri(keyCode) || WheelZoomSettings.isSiriKeyCode(this, keyCode)) &&
+            !CarPlayMediaSession.shouldHandleSiriKey(this)) return false
         // A custom Siri key assigned in the wheel-key settings: the interception is the only channel on an
         // ECARX head unit that ever sees this press, so the assignment is resolved here and handed to the
         // same Siri entry the factory voice key uses. It wins over a learnt swKey_* action for the same code.
@@ -1700,6 +1715,7 @@ open class CarPlayHostActivity : ComponentActivity() {
         val press = com.shilapi.xcertplay.airplay.EcarxSwKey.resolve(
             com.shilapi.xcertplay.airplay.EcarxSwKey.prefs(this), keyCode)
         if (press == null) return false
+        if (press.isSiri && !CarPlayMediaSession.shouldHandleSiriKey(this)) return false
         val ctrl = controller
         if (press.isMedia && CarPlayMediaSession.isMediaCenterActive(ctrl)) return false
         val sent = when {

@@ -16,9 +16,31 @@ internal enum class MediaSessionMode { ANDROID, ECARX }
  */
 internal enum class VoiceKeyPress(val type: Int) { SHORT(0), LONG(1) }
 
+internal enum class HySiriKey(val value: Int, val label: String, vararg val codes: Int) {
+    TOGGLE_155_156(0, "155/156", 155, 156),
+    TOGGLE_312_303(1, "312/303", 312, 303),
+}
+
 internal object MediaSessionSettings {
     private const val PREFS = "diplay_media_session"
     private const val KEY_VOICE_PRESS = "voice_key_press"
+
+    fun wheelSiriEnabled(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("wheel_siri_enabled", true)
+
+    fun setWheelSiriEnabled(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean("wheel_siri_enabled", enabled).apply()
+    }
+
+    fun hySiriKey(context: Context): HySiriKey {
+        val value = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt("hy_siri_key", 0)
+        return HySiriKey.entries.firstOrNull { it.value == value } ?: HySiriKey.TOGGLE_155_156
+    }
+
+    fun setHySiriKey(context: Context, key: HySiriKey) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putInt("hy_siri_key", key.value).apply()
+    }
 
     fun mode(context: Context): MediaSessionMode =
         if (context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("ecarx", true))

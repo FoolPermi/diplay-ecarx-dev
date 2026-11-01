@@ -1,7 +1,6 @@
 package com.shilapi.xcertplay
 
 import android.net.Uri
-import com.shilapi.xcertplay.hud.EcarxOutputSettings
 import com.shilapi.xcertplay.mediacenter.MediaCenterSessionEngine
 import com.shilapi.xcertplay.mediacenter.EcarxMediaCenterTransport
 import java.util.concurrent.TimeUnit
@@ -627,10 +626,12 @@ internal object CarPlayMediaSession {
             EcarxKeyBroadcasts.registerVoice(
                 context,
                 // Read per press, so switching short / long in the settings takes effect at once.
-                takesPress = { it == MediaSessionSettings.voiceKeyPress(context).type },
+                takesPress = { MediaSessionSettings.wheelSiriEnabled(context) &&
+                    it == MediaSessionSettings.voiceKeyPress(context).type },
                 shouldHandle = {
                     synchronized(this) {
-                        val eligible = controller === expected && voiceKeySession === session &&
+                        val eligible = MediaSessionSettings.wheelSiriEnabled(context) &&
+                            controller === expected && voiceKeySession === session &&
                             expected.activeAirPlaySession() === session && !inCall(context)
                         if (!eligible) {
                             externalSiriKey.reset()
@@ -660,7 +661,8 @@ internal object CarPlayMediaSession {
                             val request = Runnable {
                                 synchronized(this) delayed@{
                                     delayedVoiceSiri = null
-                                    if (controller !== expected || voiceKeySession !== session ||
+                                    if (!MediaSessionSettings.wheelSiriEnabled(context) ||
+                                        controller !== expected || voiceKeySession !== session ||
                                         expected.activeAirPlaySession() !== session || inCall(context) ||
                                         !WheelZoomSettings.isSiriKey(context, assignedVoice) ||
                                         !WheelZoomSettings.siriDoublePress(context)) return@delayed
@@ -715,6 +717,14 @@ internal object CarPlayMediaSession {
         if (appContext?.let(::shouldHandleSiriKey) != true) return false
         if (voiceKeyReceiver != null && CarPlayMediaButton.opensSiri(keyCode)) return false
         return requestSiriFromAction()
+    }
+
+    internal fun handleHySiriKey(event: KeyEvent, keys: HySiriKeys): Boolean? {
+        val context = appContext ?: return null
+        return keys.handle(context, event,
+            enabled = outputMode == MediaSessionMode.ANDROID && MediaSessionSettings.wheelSiriEnabled(context) &&
+                controller?.activeAirPlaySession() != null,
+            calling = inCall(context), request = ::requestSiriFromAction)
     }
 
     /** An explicit HY handoff remains valid when DiPlay also listens for the physical voice key. */
@@ -878,7 +888,7 @@ internal object CarPlayMediaSession {
         lastMediaPublication = now
         lastMediaArtwork = artwork
         mediaCenterEngine.update(MediaCenterSessionEngine.Desired(entry, now, artwork) {
-            mediaCenterOwner === entry && outputMode == MediaSessionMode.ECARX && EcarxOutputSettings.mediaEnabled(entry.context) &&
+            mediaCenterOwner === entry && outputMode == MediaSessionMode.ECARX &&
                 CarPlayBackgroundSession.active &&
                 CarPlayBackgroundSession.snapshot()?.controller === entry.controller
         })
@@ -887,7 +897,8 @@ internal object CarPlayMediaSession {
     internal fun managesVehicleKeys(): Boolean = outputMode == MediaSessionMode.ECARX
 
     internal fun shouldHandleSiriKey(context: Context): Boolean =
-        outputMode != MediaSessionMode.ANDROID || !EcarxCapabilities.detect(context).identified
+        MediaSessionSettings.wheelSiriEnabled(context) &&
+            (outputMode != MediaSessionMode.ANDROID || !EcarxCapabilities.detect(context).identified)
 
     fun isMediaCenterActive(controller: CarPlayController? = null): Boolean {
         val entry = mediaCenterOwner ?: return false

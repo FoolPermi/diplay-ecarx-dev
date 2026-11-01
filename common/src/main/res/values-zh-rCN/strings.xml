@@ -649,15 +649,15 @@
     <string name="wheel_key_role_siri">Siri</string>
     <string name="wheel_key_none">无</string>
     <string name="wheel_key_in_use">该按键已用于%1$s。请选择其他按键。</string>
-    <string name="wheel_siri_key">方向盘 Siri 按键</string>
-    <string name="wheel_siri_key_description">在 CarPlay 显示于屏幕时，用你选择的方向盘按键打开 Siri。车辆自身保留的按键只能配合方向盘按键服务使用，该服务在 CarPlay 处于后台时也可使用。未连接 CarPlay 或通话时，该按键保留车辆原有功能。</string>
+    <string name="wheel_siri_key">方向盘唤醒 Siri</string>
+    <string name="wheel_siri_key_description">关闭后按键保留原车功能，Siri 快捷入口仍可使用。</string>
     <string name="wheel_siri_double_press">双击触发 Siri</string>
     <string name="wheel_siri_double_press_description">单击保留车辆原有功能。在设定间隔内按两次，DiPlay 会在设定延时后打开 Siri。如果原车助手会接管屏幕，则必须启用方向盘按键服务。立即生效。</string>
     <string name="wheel_siri_double_press_interval">双击间隔</string>
     <string name="wheel_siri_trigger_delay">Siri 触发延时</string>
     <string name="wheel_key_role_back">返回</string>
     <string name="wheel_key_service_label">DiPlay 方向盘按键</string>
-    <string name="wheel_key_service_description">可选方向盘按键过滤，用于导航播报音量、仪表地图缩放、CarPlay摇杆及通话控制。不读取屏幕内容。</string>
+    <string name="wheel_key_service_description">可选按键服务，用于后台 Siri 按键、导航音量、仪表地图缩放、CarPlay 摇杆及通话控制。不读取屏幕内容。</string>
     <string name="carplay_calls_on_dashboard">仪表盘显示 CarPlay 通话</string>
     <string name="song_on_hud">HUD 显示曲名或歌词</string>
     <string name="song_on_hud_description">无导航指引时显示手机提供的曲名或歌词，导航方向和道路名称优先。</string>
@@ -916,8 +916,11 @@
     <string name="settings_hotspot_probe_rejected">请求被拒绝或输入不合法。</string>
     <string name="settings_hotspot_probe_denied">接口拒绝访问，权限不足。</string>
     <string name="settings_hotspot_probe_unsupported">接口或配置不受支持。</string>
-    <string name="settings_media_output_mode">车机媒体接管方</string>
+    <string name="settings_media_output_mode">车机媒体集成</string>
     <string name="settings_media_output_android">HY 代理</string>
     <string name="settings_media_output_ecarx">DiPlay 直接接管</string>
-    <string name="settings_media_output_description">两种模式都向安卓桌面提供媒体信息与控制。DiPlay 直接发布到亿咖通；HY 代理模式由 HY 发布，并接收封面补发。直接接管时需关闭 HY 的媒体代理。自定义 Siri 按键均可用。下次连接 CarPlay 生效。</string>
+    <string name="settings_media_output_description">由 DiPlay 直接处理仪表歌曲和媒体控制，或交给 HY。选择 DiPlay 时需关闭 HY 的媒体接管。下次连接 CarPlay 生效。</string>
+    <string name="settings_hy_siri_key">HY Siri 按键</string>
+    <string name="settings_hy_siri_key_description">在 HY 方向盘设置中选择对应的模拟按键切换选项。修改立即生效。</string>
+    <string name="settings_hy_siri_background">后台使用 Siri 按键</string>
 </resources>

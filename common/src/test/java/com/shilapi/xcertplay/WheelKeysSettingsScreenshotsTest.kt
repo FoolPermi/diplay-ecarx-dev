@@ -32,7 +32,8 @@ class WheelKeysSettingsScreenshotsTest {
         // Identify the head unit as ECARX, so the voice-key takeover row is part of the screenshot.
         org.robolectric.Shadows.shadowOf(activity.packageManager).installPackage(
             android.content.pm.PackageInfo().apply { packageName = "com.ecarx.xui.service" })
-        WheelZoomSettings.setSiriKey(activity, true)
+        MediaSessionSettings.setMode(activity, MediaSessionMode.ECARX)
+        MediaSessionSettings.setWheelSiriEnabled(activity, true)
         try {
             val row = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
             DiPlayActivity::class.java.getDeclaredMethod("wheelKeysSettings", LinearLayout::class.java)
@@ -44,6 +45,7 @@ class WheelKeysSettingsScreenshotsTest {
             assertTrue(texts.any { it.startsWith(activity.getString(R.string.settings_voice_key_press)) })
             assertFalse(texts.contains(activity.getString(R.string.wheel_media_play_pause)))
             assertFalse(texts.any { it.startsWith(activity.getString(R.string.settings_custom_wheel_keys)) })
+            assertFalse(texts.any { it.contains("点按以学习") })
             val width = 1920
             row.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
                 View.MeasureSpec.makeMeasureSpec(1080, View.MeasureSpec.EXACTLY))
@@ -61,6 +63,35 @@ class WheelKeysSettingsScreenshotsTest {
         } finally {
             activity.finish()
         }
+    }
+
+    @Test fun hyAndDisabledLayoutsShowOnlyTheApplicableChoices() {
+        val activity = Robolectric.buildActivity(DiPlayActivity::class.java).get()
+        activity.setTheme(android.R.style.Theme_Material_NoActionBar)
+        MediaSessionSettings.setMode(activity, MediaSessionMode.ANDROID)
+        try {
+            for (enabled in listOf(true, false)) {
+                MediaSessionSettings.setWheelSiriEnabled(activity, enabled)
+                val row = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
+                DiPlayActivity::class.java.getDeclaredMethod("wheelKeysSettings", LinearLayout::class.java)
+                    .apply { isAccessible = true }.invoke(activity, row)
+                val texts = allViews(row).filterIsInstance<TextView>().map { it.text.toString() }.toList()
+                assertTrue(texts.any { it.contains(activity.getString(R.string.wheel_siri_key)) })
+                assertTrue(texts.any { it.startsWith(activity.getString(R.string.settings_hy_siri_key) + " · ") } == enabled)
+                assertFalse(texts.any { it.startsWith(activity.getString(R.string.settings_voice_key_press)) })
+                assertFalse(texts.any { it.contains("学习") || it.contains("双击") || it.contains("MEDIA_") })
+                row.measure(View.MeasureSpec.makeMeasureSpec(1920, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(1080, View.MeasureSpec.EXACTLY))
+                row.layout(0, 0, 1920, 1080)
+                val bitmap = Bitmap.createBitmap(1920, 1080, Bitmap.Config.ARGB_8888)
+                try {
+                    row.draw(Canvas(bitmap))
+                    val file = File("build/reports/wheel-keys-ui/hy-${if (enabled) "on" else "off"}.png")
+                    requireNotNull(file.parentFile).mkdirs()
+                    file.outputStream().use { assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+                } finally { bitmap.recycle() }
+            }
+        } finally { activity.finish() }
     }
 
     private fun allViews(view: View): Sequence<View> = sequence {

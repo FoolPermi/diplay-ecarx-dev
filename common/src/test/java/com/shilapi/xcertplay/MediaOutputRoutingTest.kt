@@ -114,12 +114,12 @@ class MediaOutputRoutingTest {
         }
     }
 
-    @Test fun disabledMasterPreventsActualRouterRegistrationDespiteActiveMedia() {
+    @Test fun oldClusterCardSwitchDoesNotDisableTheSelectedMediaBackend() {
         EcarxOutputSettings.setMediaEnabled(app, false)
-        val attached = attach("Do not register")
-        attached.now(song("Do not register")); tickEngine()
-        assertTrue(ecarx.isEmpty())
-        assertFalse(CarPlayMediaSession.isMediaCenterActive(attached.controller))
+        val attached = attach("Selected backend")
+        attached.now(song("Selected backend")); tickEngine()
+        assertTrue(ecarx.isNotEmpty())
+        assertTrue(CarPlayMediaSession.isMediaCenterActive(attached.controller))
     }
 
     @Test fun artworkDiagnosticRequestsRetainTransitionsButDoNotLogProgressOrTrackText() {
@@ -523,15 +523,15 @@ class MediaOutputRoutingTest {
             "source=mediacenter index=${CarPlayMediaButton.NEXT} sent=false"))
     }
 
-    @Test fun disablingMediaOutputDropsAnAlreadyQueuedVendorCommand() {
+    @Test fun oldClusterCardSwitchDoesNotDropVendorMediaCommands() {
         val platform = Platform().also { callbackPlatform = it }
         val attached = attach("Disable output")
         val client = checkNotNull(platform.service.client)
         assertTrue(client.onNext())
         EcarxOutputSettings.setMediaEnabled(app, false)
         shadowOf(Looper.getMainLooper()).idle()
-        verify(attached.controller, never()).sendMediaButton(anyInt())
-        assertFalse(client.onNext())
+        verify(attached.controller).sendMediaButton(CarPlayMediaButton.NEXT)
+        assertTrue(client.onNext())
     }
 
     @Test fun vendorMediaKeyKeepsTheCarVideoPlayerPriority() {

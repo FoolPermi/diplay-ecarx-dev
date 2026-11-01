@@ -118,7 +118,6 @@ internal enum class SettingsSection {
     MEDIA_OUTPUT,
     CAR_BUTTON,
     AUDIO_ROUTING,
-    BLUETOOTH_AUDIO,
     AUTHENTICATION,
     EXTERNAL_CONTROLLER,
     NAVIGATION_WHEEL,
@@ -140,7 +139,7 @@ internal object SettingsInformationArchitecture {
             SettingsSection.PERMISSIONS_AND_HELP,
         ),
         SettingsCategory.DISPLAY to setOf(SettingsSection.DISPLAY_AND_PERFORMANCE),
-        SettingsCategory.AUDIO to setOf(SettingsSection.AUDIO_ROUTING, SettingsSection.BLUETOOTH_AUDIO),
+        SettingsCategory.AUDIO to setOf(SettingsSection.MEDIA_OUTPUT, SettingsSection.AUDIO_ROUTING),
         SettingsCategory.NAVIGATION to setOf(SettingsSection.LOCATION),
         SettingsCategory.VEHICLE to setOf(
             SettingsSection.CARPLAY_CONTROLS,
@@ -154,26 +153,15 @@ internal object SettingsInformationArchitecture {
             SettingsSection.EXTERNAL_CONTROLLER,
             SettingsSection.EXPERIMENTAL_DISPLAY,
             SettingsSection.ADVANCED_MEDIA,
-            SettingsSection.MEDIA_OUTPUT,
             SettingsSection.NAVIGATION_WHEEL,
         ),
     )
 }
 
-/**
- * Whether the settings page offers key learning for the wheel keys DiPlay does not act on.
- *
- * Off: DiPlay is a CarPlay receiver, and the keys it acts on are already mapped — the voice key opens
- * Siri (a short press while CarPlay owns it, a long press stays with the car) and next / previous / play
- * reach CarPlay themselves. The Siri key switch therefore stays visible; the learning list for
- * everything else does not. On the car the ECARX interception delivered nothing but the voice key (31
- * presses, all key=200231) and the accessibility service delivered nothing at all, so that list could
- * only ever time out in front of a driver. Flip this to true to bring it back for diagnosis.
- */
-private const val WHEEL_KEY_LEARNING_VISIBLE = false
-
 /** DiAuto's visual language, with a connection flow for an independent CarPlay receiver. */
 class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
+    private val hySiriKeys = HySiriKeys()
+    private var hySiriBackgroundExpanded = false
     private val handler = Handler(Looper.getMainLooper())
     private var appNight = true
     override val currentAppNight: Boolean get() = appNight
@@ -1483,7 +1471,6 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     private fun openSearchResult(result: SettingsSearchResult) {
         setSearchKeyboard(settingsSearchBox, false)
         clearSettingsSearchState()
-        if (result.category == SettingsCategory.VEHICLE) customWheelKeysExpanded = true
         if (result.category == SettingsCategory.AUDIO) audioTuningExpanded = true
         openSettingsCategory(result.category)
         val scroll = rootScroll ?: return
@@ -2110,22 +2097,6 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 markReconnectNeeded()
             }
         }
-        filteredSection(content, SettingsSection.BLUETOOTH_AUDIO,
-            getString(R.string.settings_bluetooth_audio), R.drawable.ic_dp_audio) { card ->
-            val mediaYieldToggle = toggle(card, getString(R.string.settings_bluetooth_media_yield),
-                getString(R.string.settings_bluetooth_media_yield_description),
-                CarBluetoothProfileGuard.mediaOnlyEnabled(this),
-                enabled = !AirPlayPersistence.loadCarBluetoothAudio(this)) {
-                CarBluetoothProfileGuard.saveMediaOnlyEnabled(this, it)
-                markReconnectNeeded()
-            }
-            toggle(card, getString(R.string.settings_car_bluetooth_audio), getString(R.string.settings_car_bluetooth_audio_description),
-                AirPlayPersistence.loadCarBluetoothAudio(this)) {
-                AirPlayPersistence.saveCarBluetoothAudio(this, it)
-                mediaYieldToggle.isEnabled = !it
-                reconnectIfRunning()
-            }
-        }
         filteredSection(content, SettingsSection.CAR_BUTTON,
             getString(R.string.car_button_in_carplay), R.drawable.ic_dp_car) { card -> carButtonCard = card; carButtonControls(card) }
         filteredSection(content, SettingsSection.AUDIO_ROUTING,
@@ -2157,6 +2128,19 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 navigationChannelControl(details)
                 musicBufferChoice(details, wireless = true)
                 musicBufferChoice(details, wireless = false)
+                val mediaYieldToggle = toggle(details, getString(R.string.settings_bluetooth_media_yield),
+                    getString(R.string.settings_bluetooth_media_yield_description),
+                    CarBluetoothProfileGuard.mediaOnlyEnabled(this),
+                    enabled = !AirPlayPersistence.loadCarBluetoothAudio(this)) {
+                    CarBluetoothProfileGuard.saveMediaOnlyEnabled(this, it)
+                    markReconnectNeeded()
+                }
+                toggle(details, getString(R.string.settings_car_bluetooth_audio), getString(R.string.settings_car_bluetooth_audio_description),
+                    AirPlayPersistence.loadCarBluetoothAudio(this)) {
+                    AirPlayPersistence.saveCarBluetoothAudio(this, it)
+                    mediaYieldToggle.isEnabled = !it
+                    reconnectIfRunning()
+                }
             }
         }
         filteredSection(content, SettingsSection.EXTERNAL_CONTROLLER,
@@ -3662,21 +3646,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         }, matchButton(10, 56))
     }
 
-    /** Steering-wheel keys for the dashboard map zoom and the CarPlay joystick: the switches, the key service and the keys. */
-    // One place for the key service setup, above every feature that needs it.
     private fun wheelKeysSettings(card: LinearLayout) {
-        if (com.shilapi.xcertplay.hud.EcarxCapabilities.detect(this).identified) {
-            card.addView(label(getString(R.string.settings_ecarx_wheel_automatic), 14, MUTED))
-            // Which of the two presses DiPlay owns. The key service marks each broadcast with short or
-            // long, so the other one is left alone and still reaches the car's own assistant.
-            val presses = VoiceKeyPress.entries
-            choice(card, getString(R.string.settings_voice_key_press),
-                listOf(getString(R.string.settings_voice_key_press_short),
-                    getString(R.string.settings_voice_key_press_long)),
-                presses.indexOf(MediaSessionSettings.voiceKeyPress(this)).coerceAtLeast(0),
-                reconnects = false) { MediaSessionSettings.setVoiceKeyPress(this, presses[it]) }
-            card.addView(label(getString(R.string.settings_voice_key_press_description), 12, MUTED))
-        }
         EcarxHicarControl.state(this)?.let { hicar ->
             toggle(card, getString(R.string.settings_disable_factory_hicar),
                 getString(if (hicar.canChange) R.string.settings_disable_factory_hicar_description
@@ -3699,40 +3669,28 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 render()
             }
         }
-        // DiPlay is a CarPlay receiver, so the only wheel key it acts on here is the voice key that
-        // opens Siri (a short press while CarPlay owns the key; a long press stays with the car). That
-        // switch is always offered. Learning the other keys was offered too, but on the car neither
-        // channel heard anything else — 31 intercepted presses, every one key=200231, and nothing
-        // through the accessibility service in 1039 s — so the learning list is behind
-        // [WHEEL_KEY_LEARNING_VISIBLE] instead of sitting in the settings to time out in front of a driver.
-        val zoomAvailable = wheelMapZoomAvailable()
-        val vehicleKeysOn = WheelZoomSettings.joystick(this) ||
-            (zoomAvailable && WheelZoomSettings.enabled(this))
-        if (WheelZoomSettings.siriKey(this) || WheelZoomSettings.mediaPlayPause(this) || vehicleKeysOn) {
-            wheelKeyServiceControls(card)
+        toggle(card, getString(R.string.wheel_siri_key), getString(R.string.wheel_siri_key_description),
+            MediaSessionSettings.wheelSiriEnabled(this)) {
+            MediaSessionSettings.setWheelSiriEnabled(this, it)
+            render()
         }
-        siriKeyControls(card)
-        if (WHEEL_KEY_LEARNING_VISIBLE) learntWheelKeyControls(card)
-    }
-
-    /** The key learning for every wheel key DiPlay does not act on; off by [WHEEL_KEY_LEARNING_VISIBLE]. */
-    private fun learntWheelKeyControls(card: LinearLayout) {
-        settingsDetails(card, R.string.settings_custom_wheel_keys, customWheelKeysExpanded,
-            { customWheelKeysExpanded = it }) { inner ->
-            ecarxSwKeyControls(inner)
-            inner.addView(label(getString(R.string.settings_generic_wheel_keys), 16, MUTED))
-            toggle(inner, getString(R.string.wheel_media_play_pause),
-                getString(R.string.wheel_media_play_pause_description),
-                WheelZoomSettings.mediaPlayPause(this)) {
-                WheelZoomSettings.setMediaPlayPause(this, it)
-                render()
+        if (!MediaSessionSettings.wheelSiriEnabled(this)) return
+        if (MediaSessionSettings.mode(this) == MediaSessionMode.ECARX) {
+            val presses = VoiceKeyPress.entries
+            choice(card, getString(R.string.settings_voice_key_press),
+                listOf(getString(R.string.settings_voice_key_press_short), getString(R.string.settings_voice_key_press_long)),
+                presses.indexOf(MediaSessionSettings.voiceKeyPress(this)), reconnects = false) {
+                MediaSessionSettings.setVoiceKeyPress(this, presses[it])
             }
-            if (WheelZoomSettings.mediaPlayPause(this)) {
-                wheelKeyAssignButton(inner, WheelZoomSettings.Role.MEDIA_PLAY_PAUSE,
-                    getString(R.string.wheel_key_role_media_play_pause))
+        } else {
+            val keys = HySiriKey.entries
+            choice(card, getString(R.string.settings_hy_siri_key), keys.map { it.label },
+                keys.indexOf(MediaSessionSettings.hySiriKey(this)), reconnects = false) {
+                MediaSessionSettings.setHySiriKey(this, keys[it])
             }
-            // Keep previously configured controls reachable even if nothing else is turned on.
-            if (wheelMapZoomAvailable() || WheelZoomSettings.joystick(this)) wheelKeyControls(inner)
+            card.addView(label(getString(R.string.settings_hy_siri_key_description), 14, MUTED))
+            settingsDetails(card, R.string.settings_hy_siri_background, hySiriBackgroundExpanded,
+                { hySiriBackgroundExpanded = it }) { wheelKeyServiceControls(it) }
         }
     }
 
@@ -3856,37 +3814,6 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             if (names.isEmpty()) continue
             wheelKeyAssignButton(card, role, names.joinToString(" · ") { getString(it) })
         }
-    }
-
-    /** A wheel key that opens Siri on any car whose key reaches the key service. */
-    private fun siriKeyControls(card: LinearLayout) {
-        toggle(card, getString(R.string.wheel_siri_key), getString(R.string.wheel_siri_key_description),
-            WheelZoomSettings.siriKey(this)) {
-            WheelZoomSettings.setSiriKey(this, it)
-            render()
-        }
-        if (!WheelZoomSettings.siriKey(this)) return
-        toggle(card, getString(R.string.wheel_siri_double_press),
-            getString(R.string.wheel_siri_double_press_description),
-            WheelZoomSettings.siriDoublePress(this)) {
-            WheelZoomSettings.setSiriDoublePress(this, it)
-            render()
-        }
-        if (WheelZoomSettings.siriDoublePress(this)) {
-            val intervals = WheelZoomSettings.SIRI_DOUBLE_PRESS_INTERVALS
-            choice(card, getString(R.string.wheel_siri_double_press_interval),
-                intervals.map { getString(R.string.fps_counter_millis, it) },
-                intervals.indexOf(WheelZoomSettings.siriDoublePressIntervalMillis(this)), reconnects = false) {
-                WheelZoomSettings.setSiriDoublePressIntervalMillis(this, intervals[it])
-            }
-            val delays = WheelZoomSettings.SIRI_TRIGGER_DELAYS
-            choice(card, getString(R.string.wheel_siri_trigger_delay),
-                delays.map { getString(R.string.fps_counter_millis, it) },
-                delays.indexOf(WheelZoomSettings.siriTriggerDelayMillis(this)), reconnects = false) {
-                WheelZoomSettings.setSiriTriggerDelayMillis(this, delays[it])
-            }
-        }
-        wheelKeyAssignButton(card, WheelZoomSettings.Role.SIRI, getString(R.string.wheel_key_role_siri))
     }
 
     private fun wheelKeyServiceControls(card: LinearLayout) {
@@ -4138,13 +4065,6 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             EcarxOutputSettings.presentationSwitch(this)) { on ->
             if (on) confirmClusterMirror(projectionRow) else applyClusterMirror(false)
         }
-        // The ECARX MediaCenter switch is independent of navigation.
-        if (com.shilapi.xcertplay.hud.EcarxCapabilities.dimMediaPresent()) {
-            toggle(card, getString(R.string.ecarx_media_on_instrument_cluster),
-                getString(R.string.ecarx_media_on_instrument_cluster_description),
-                EcarxOutputSettings.mediaEnabled(this),
-                save = this::onEcarxMediaToggled)
-        }
         lateinit var safeAreaButton: Button
         safeAreaButton = button(getString(R.string.settings_ecarx_cluster_safe_area) + VALUE_SEPARATOR +
             getString(if (AirPlayPersistence.loadClusterSafeAreaRect(this) == null)
@@ -4233,11 +4153,6 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
      * numbers `DiPlayActivity`'s lambda classes by their position in this file — one more lambda
      * anywhere in here renames every later one and trips the class-set regression check.
      */
-    private fun onEcarxMediaToggled(enabled: Boolean) {
-        EcarxOutputSettings.setMediaEnabled(this, enabled)
-        NavigationOutputs.ecarxChanged(this)
-    }
-
     /** Asks before the mirror goes up, because it is the one switch that hides the other outputs. */
     /** Why the mirror dialog closed without a confirmation; cleared once it has been reported. */
     private var clusterMirrorCancelReason: String? = null
@@ -4277,6 +4192,9 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        CarPlayMediaSession.handleHySiriKey(event, hySiriKeys)?.let {
+            return it || super.dispatchKeyEvent(event)
+        }
         if (event.action != KeyEvent.ACTION_DOWN && event.action != KeyEvent.ACTION_UP) return super.dispatchKeyEvent(event)
         // ECARX steering-wheel learning (the reference app's SWKeyActivity): capture the next key for the
         // pending action. BACK cancels; a call never learns.
@@ -5062,8 +4980,10 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         appendLine("CarPlay screen: ${CarPlayScreen.report(appContext)}")
         appendLine(PhoneWakeDiagnostics.report(appContext))
         appendLine(ConnectionDiagnostics.report(appContext))
+        appendLine("Media integration savedMode=${MediaSessionSettings.mode(appContext)}")
+        appendLine("Wheel Siri enabled=${MediaSessionSettings.wheelSiriEnabled(appContext)} " +
+            "voicePress=${MediaSessionSettings.voiceKeyPress(appContext)} hyKey=${MediaSessionSettings.hySiriKey(appContext)}")
         appendLine(CarPlayMediaSession.mediaCenterDiagnosticReport())
-        appendLine("ECARX MediaCenter clusterMediaEnabled=${com.shilapi.xcertplay.hud.EcarxOutputSettings.mediaEnabled(appContext)}")
         appendLine(CarPlayMediaSession.diagnosticReport())
         appendLine(SystemMediaSessionDiagnostics.report(appContext))
         appendLine("Cluster output: " + CarPlayBackgroundSession.clusterDiagnostics(CarPlayBackgroundSession.snapshot()?.controller))

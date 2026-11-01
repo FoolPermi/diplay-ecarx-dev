@@ -34,7 +34,7 @@ class BluetoothMediaYieldSettingsTest {
         activity.getSharedPreferences("diplay_bt_profile_guard", 0).edit().clear().commit()
         AirPlayPersistence.saveCarBluetoothAudio(activity, false)
         ReflectionHelpers.setField(activity, "page", "settings")
-        ReflectionHelpers.setField(activity, "settingsSectionFilter", setOf(SettingsSection.BLUETOOTH_AUDIO))
+        ReflectionHelpers.setField(activity, "settingsSectionFilter", setOf(SettingsSection.AUDIO_ROUTING))
     }
 
     @After fun cleanup() {

@@ -47,7 +47,7 @@ internal object GeelyWheelKeys {
     /** Binds while a CarPlay session is active; safe to call repeatedly. */
     @Synchronized
     fun start(context: Context) {
-        if (!CarPlayMediaSession.shouldHandleSiriKey(context)) {
+        if (!CarPlayMediaSession.managesVehicleKeys() && !CarPlayMediaSession.shouldHandleSiriKey(context)) {
             stop()
             return
         }
@@ -85,7 +85,7 @@ internal object GeelyWheelKeys {
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
             val context = appContext ?: return
-            if (!CarPlayMediaSession.shouldHandleSiriKey(context)) {
+            if (!CarPlayMediaSession.managesVehicleKeys() && !CarPlayMediaSession.shouldHandleSiriKey(context)) {
                 stop()
                 return
             }

@@ -40,6 +40,7 @@ import com.shilapi.xcertplay.telecom.PhoneAudioRouteSettings
  * the Tang the console's volume sends the same codes as the wheel's, so it zooms and moves too.
  */
 class WheelKeyService : AccessibilityService() {
+    private val hySiriKeys = HySiriKeys()
     private val keys = WheelZoomKeys()
     private val navigationKeys = NavigationWheelKeyPolicy()
     private val joystick = WheelJoystick()
@@ -174,6 +175,7 @@ class WheelKeyService : AccessibilityService() {
     }
 
     private fun handleKey(event: KeyEvent): Boolean {
+        CarPlayMediaSession.handleHySiriKey(event, hySiriKeys)?.let { return it }
         if (event.action != KeyEvent.ACTION_DOWN && event.action != KeyEvent.ACTION_UP) return false
         if (learning == null &&
             (CarPlayMediaButton.opensSiri(event.keyCode) || WheelZoomSettings.isSiriKey(this, WheelKey.of(event))) &&

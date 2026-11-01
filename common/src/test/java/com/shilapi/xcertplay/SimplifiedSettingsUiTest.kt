@@ -105,9 +105,10 @@ class SimplifiedSettingsUiTest {
         assertTrue(hasTitle(settings(SettingsCategory.NAVIGATION), R.string.report_location_to_iphone))
     }
 
-    @Test fun mediaModeHasAnAdvancedEntry() {
-        val root = settings(SettingsCategory.ADVANCED)
+    @Test fun mediaModeLivesInAudioOnly() {
+        val root = settings(SettingsCategory.AUDIO)
         assertTrue(hasTitle(root, R.string.settings_media_output_mode))
+        assertFalse(hasTitle(settings(SettingsCategory.ADVANCED), R.string.settings_media_output_mode))
         val focused = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(24, 16, 24, 16)
