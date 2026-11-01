@@ -13,8 +13,7 @@ public final class DimInteraction {
     public static int presentationOption = -1;
     public IInteractionCallback callback;
 
-    // Registration ABI only: callback member descriptors have not been recovered.
-    public interface IInteractionCallback { }
+    public interface IInteractionCallback { void onShowPresentationOptionChanged(int option); }
 
     public static DimInteraction instance() { return INSTANCE; }
     public static DimInteraction create(Context context) {

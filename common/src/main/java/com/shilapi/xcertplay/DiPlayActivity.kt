@@ -4183,7 +4183,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         // is the only thing that says whether the driver, a cancelled dialog or a rebuilt switch did it.
         val origin = clusterMirrorCancelReason ?: if (show) "settings-on" else "settings-off"
         clusterMirrorCancelReason = null
-        if (!NavigationOutputs.requestPresentation(this, show, origin)) {
+        if (!NavigationOutputs.requestPresentation(this, show, origin, fromSettings = true)) {
             toast(getString(R.string.ecarx_cluster_call_rejected))
         }
     }

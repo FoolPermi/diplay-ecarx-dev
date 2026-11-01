@@ -68,9 +68,9 @@ object NavigationOutputs {
      * Shared entry for settings and the host window. The bridge owns the saved request, runtime
      * intent and retry watch; acceptance does not prove the instrument panel is displaying it.
      */
-    fun requestPresentation(context: Context, show: Boolean, origin: String = ""): Boolean {
+    fun requestPresentation(context: Context, show: Boolean, origin: String = "", fromSettings: Boolean = false): Boolean {
         EcarxHudBridge.initialize(context)
-        return EcarxHudBridge.applyPresentation(show, origin).ok
+        return EcarxHudBridge.applyPresentation(show, origin, fromSettings).ok
     }
 
     fun diagnosticReport(context: Context): String = EcarxHudBridge.diagnostics(context)
