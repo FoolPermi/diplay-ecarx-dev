@@ -11,8 +11,8 @@ import java.util.Set;
  * Static recorder shared by the fake DIM classes and the tests that drive them.
  *
  * The fixture classes in this package reproduce the binary names and signatures that
- * `EcarxDimApi` looks up reflectively on the head unit. Every fake records the calls it
- * receives here, and the payloads handed in (the app's `Proxy` implementations of the
+ * `EcarxDimApi` calls on the head unit. Every fake records the calls it
+ * receives here, and the payloads handed in (the app's typed implementations of the
  * `I*Info` interfaces) are read back getter by getter so a test can assert the exact field
  * mapping the cluster service would see.
  */

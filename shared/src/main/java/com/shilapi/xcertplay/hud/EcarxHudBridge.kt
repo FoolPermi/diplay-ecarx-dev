@@ -41,8 +41,8 @@ import java.util.concurrent.TimeUnit
  *    data. The arrow is still gated behind [EcarxOutputSettings.turnArrowExperimental] until the
  *    car confirms what the cluster actually draws.
  *
- * Every ECARX call is reflection-only (see [EcarxDimApi]): a direct reference would turn a
- * missing system class into a `NoClassDefFoundError` on every non-ECARX head unit.
+ * [EcarxDimApi] uses the compile-only SDK behind app-owned handles. Runtime detection and
+ * guarded dispatch keep missing vendor classes from breaking non-ECARX head units.
  */
 internal object EcarxHudBridge {
     private const val TAG = "DiPlay-ECARX-HUD"
@@ -157,10 +157,10 @@ internal object EcarxHudBridge {
     private val route = RouteGuidanceState(liveSession = { currentSession?.invoke() == true })
     private var context: Context? = null
     private var ecarxDetected = false
-    private var dim: Any? = null
-    private var navi: Any? = null
+    private var dim: EcarxDimApi.DimHandle? = null
+    private var navi: EcarxDimApi.NaviHandle? = null
     private var protocol: Any? = null
-    /** Non-null once the DIM can reach us; the proxies are held so the platform cannot collect them. */
+    /** Non-null once the DIM can reach us; callbacks are held for the lifetime of the registration. */
     private var dimCallback: Any? = null
     private var naviCallback: Any? = null
     /** Where the session report gets its HUD lines; see [attachReport]. */
@@ -756,7 +756,7 @@ internal object EcarxHudBridge {
      * unit that lacks `updateTurnByTurnArrow(int)`.
      */
     private fun pushArrowLocked(
-        navi: Any,
+        navi: EcarxDimApi.NaviHandle,
         maneuver: AppleManeuver,
         guidance: EcarxDimApi.Guidance,
     ): String {

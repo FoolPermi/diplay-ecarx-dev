@@ -21,6 +21,9 @@ public interface INaviInteraction {
     // Observed on the target head unit and in the shipped 753 navigation plugin.
     interface INavigationInteractionCallback { void onDoInteractionAction(int action, IAddress address); }
     interface IAddress { }
+    interface IHighwayExitInfo { }
+    interface IRoadCamera { }
+    interface IServiceArea { }
     interface ILaneInfo {
         int getLaneNumber();
         int getLaneBackIconId();
@@ -38,10 +41,8 @@ public interface INaviInteraction {
         int getNavigationStatus();
         String getNextGuidancePointName();
         String getNavigationTurnSVG();
-        // The source records these as reference getters without their return descriptors.
-        // Object checks their null-only behavior without inventing OEM binary names.
-        Object getHighwayExitInfo();
-        Object getRoadCameraInfo();
-        Object getServiceAreaInfo();
+        IHighwayExitInfo getHighwayExitInfo();
+        IRoadCamera getRoadCameraInfo();
+        IServiceArea getServiceAreaInfo();
     }
 }

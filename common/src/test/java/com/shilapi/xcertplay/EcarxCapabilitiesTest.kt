@@ -2,6 +2,8 @@ package com.shilapi.xcertplay
 
 import android.content.pm.PackageInfo
 import com.shilapi.xcertplay.hud.EcarxCapabilities
+import com.shilapi.xcertplay.hud.EcarxSwKeyIntercept
+import com.shilapi.xcertplay.hud.EcarxVehicleDayNight
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -22,6 +24,31 @@ class EcarxCapabilitiesTest {
         assertFalse(EcarxCapabilities.detect(context).identified)
         assertFalse(EcarxCapabilities.dimPresent())
         assertFalse(EcarxCapabilities.dimMediaPresent())
+    }
+
+    @Test fun compileOnlySdkDoesNotBreakStartupWithoutVendorClasses() {
+        val night = EcarxVehicleDayNight(context)
+        assertFalse(night.available)
+        assertFalse(night.start { fail("No vehicle source should deliver") })
+        night.stop()
+        assertNull(EcarxSwKeyIntercept.register(context, object : EcarxSwKeyIntercept.Listener {
+            override fun onKeyPressed(keyCode: Int) = false
+            override fun onKeyReleased(keyCode: Int) = false
+        }))
+    }
+
+    @Test fun microphoneArbitrationDoesNotBlockRecordingWithoutVendorClasses() {
+        // The policy is internal to shared; invoke its app-owned reflection boundary.
+        val type = Class.forName("com.shilapi.xcertplay.hud.EcarxMicPolicy")
+        val policy = type.getField("INSTANCE").get(null)
+        assertFalse(type.getMethod("available", android.content.Context::class.java).invoke(policy, context) as Boolean)
+        val listenerType = Class.forName("com.shilapi.xcertplay.hud.EcarxMicPolicy\$Listener")
+        val listener = java.lang.reflect.Proxy.newProxyInstance(listenerType.classLoader, arrayOf(listenerType)) { _, _, _ ->
+            fail("Missing SDK must not invoke callbacks")
+        }
+        assertNull(type.getMethod("requestMic", android.content.Context::class.java, Int::class.javaPrimitiveType, listenerType)
+            .invoke(policy, context, 2, listener))
+        assertTrue((type.getMethod("describe").invoke(policy) as String).contains("policyApi=false"))
     }
 
     @Test fun vendorPackagesKeepTheExistingGateWithoutClaimingDimSupport() {

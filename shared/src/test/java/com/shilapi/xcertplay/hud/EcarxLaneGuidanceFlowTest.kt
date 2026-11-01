@@ -745,7 +745,7 @@ class EcarxLaneGuidanceFlowTest {
 
     @Test fun optionalHyStatusFollowsAggregateBeforeLifecycleAndDoesNotRepeatOnKeepalive() {
         initialize()
-        set("navi", NaviWithStatus())
+        set("navi", EcarxDimApi.NaviHandle(NaviWithStatus()))
         maneuver(); guidance()
         assertTrue(names().indexOf("updateNavigationInfo") < names().indexOf("notifyNavigationStatus"))
         assertTrue(names().indexOf("notifyNavigationStatus") < names().indexOf("notifyTurnByTurnStarted"))
@@ -763,7 +763,7 @@ class EcarxLaneGuidanceFlowTest {
     @Test fun guidancePausesFactoryNavigationBeforeFirstPublishAndRestoresAcrossAllExitPaths() {
         installFactoryNavigation(); initialize()
         // The DIM fixture checks the package state at the instant of publication.
-        set("navi", NaviCheckingFactory(context))
+        set("navi", EcarxDimApi.NaviHandle(NaviCheckingFactory(context)))
         repeat(5) { cycle ->
             maneuver(); guidance()
             assertTrue(EcarxHudBridge.isActive())
@@ -786,7 +786,7 @@ class EcarxLaneGuidanceFlowTest {
 
     @Test fun firstAndOngoingAggregateFailuresStopGuidance() {
         installFactoryNavigation(); initialize()
-        set("navi", NaviCheckingFactory(context))
+        set("navi", EcarxDimApi.NaviHandle(NaviCheckingFactory(context)))
         maneuver()
         FixtureLog.failOnce("updateNavigationInfo")
         guidance()
@@ -816,7 +816,7 @@ class EcarxLaneGuidanceFlowTest {
     @Test fun rejectedOptionalHyStatusDoesNotBlockGuidanceOrCleanup() {
         initialize()
         val target = NaviWithStatus()
-        set("navi", target)
+        set("navi", EcarxDimApi.NaviHandle(target))
         FixtureLog.failOn("notifyNavigationStatus")
         maneuver(); guidance()
         assertTrue(EcarxHudBridge.isActive())
