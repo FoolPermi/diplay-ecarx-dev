@@ -87,8 +87,8 @@ class EcarxLaneGuidanceFlowTest {
         DimInteraction.reset()
         for (name in listOf("context", "dim", "navi", "protocol", "dimCallback", "naviCallback",
             "lastPushed", "lastArrowChannel", "presentedPackage", "lanes", "lastLanePushed")) set(name, null)
-        for (name in listOf("ecarxDetected", "presentationWanted", "releaseStalePresentation", "guidanceActive")) set(name, false)
-        for (name in listOf("presentationCountdown", "presentationAttempts", "ticksSincePush")) set(name, 0)
+        for (name in listOf("ecarxDetected", "presentationWanted", "releaseStalePresentation", "routePanelWanted", "guidanceActive")) set(name, false)
+        for (name in listOf("presentationOption", "presentationCountdown", "presentationAttempts", "ticksSincePush")) set(name, 0)
         // Only the scheduler is suppressed: tests explicitly run the production tick below.
         set("tickerStarted", true)
         route = field("route").get(EcarxHudBridge) as RouteGuidanceState
@@ -283,6 +283,39 @@ class EcarxLaneGuidanceFlowTest {
         assertEquals(false, calls("setPresentationToDimSwitch").single().payload["show"])
         assertFalse(EcarxOutputSettings.presentationReleasePending(context))
         assertTrue(panelRequests.isEmpty())
+    }
+
+    @Test fun flyScreenSuspendsRetriesAndRestoresOnlyTheRequestedPanel() {
+        initialize()
+        maneuver()
+        guidance()
+        assertTrue(panelRequests.last())
+        NavigationOutputs.requestPresentation(context, true, "cluster stream")
+        fun fly(option: Int) {
+            DimInteraction.instance().callback.onShowPresentationOptionChanged(option)
+            shadowOf(Looper.getMainLooper()).idle()
+        }
+        fly(3)
+        fly(3)
+        fly(-1)
+        assertEquals(listOf(true, false), panelRequests)
+        val before = calls("setPresentationToDimSwitch").size
+        // Even a window request arriving before its queued dismissal cannot reopen the mirror.
+        NavigationOutputs.requestPresentation(context, true, "cluster stream")
+        repeat(25) { tick() }
+        assertEquals(before, calls("setPresentationToDimSwitch").size)
+        NavigationOutputs.requestPresentation(context, false, "cluster stream")
+        fly(2)
+        fly(2)
+        assertEquals(listOf(true, false, true), panelRequests)
+        NavigationOutputs.requestPresentation(context, true, "cluster stream")
+        assertEquals(true, calls("setPresentationToDimSwitch").last().payload["show"])
+        NavigationOutputs.requestPresentation(context, false, "settings-off", fromSettings = true)
+        fly(3)
+        fly(2)
+        assertFalse(panelRequests.last())
+        repeat(25) { tick() }
+        assertEquals(false, calls("setPresentationToDimSwitch").last().payload["show"])
     }
 
     @Test fun startupWithoutResidueDoesNotTouchProjection() {

@@ -191,6 +191,14 @@ internal object EcarxHudBridge {
     /** Which arrow channel the last frame left on, so the report prints the changes and not the ticks. */
     private var lastArrowChannel: String? = null
     private var ticksSincePush = 0
+    private var presentationOption = 0 // Unknown until DIM sends its first callback.
+    private val platformAllowsProjection: Boolean
+        get() = when (presentationOption) {
+            1 -> guidanceActive // SHOW_PRESENTATION_NAVI_ROUTE
+            3 -> false          // SHOW_PRESENTATION_NEVER
+            else -> true        // SHOW_PRESENTATION_ALWAYS or no callback yet
+        }
+    private var routePanelWanted = false
     private var guidanceActive = false
     private var lastGuidanceEnd = "none"
 
@@ -205,7 +213,7 @@ internal object EcarxHudBridge {
 
     fun setClusterPanelOwner(owner: ((Boolean) -> Unit)?) = synchronized(lock) {
         clusterPresentationRequested = owner
-        owner?.invoke(guidanceActive)
+        owner?.invoke(routePanelWanted && platformAllowsProjection)
     }
 
     fun clearClusterPanelOwner(expected: (Boolean) -> Unit) = synchronized(lock) {
@@ -333,8 +341,24 @@ internal object EcarxHudBridge {
         // its handler logs `onDoInteractionAction ACTION_GET_FAVORITE`, i.e. the cluster queries the
         // navigation side for data. Without a registration those requests have no receiver on our
         // side and simply time out, so register both handles the stock app registers (`a/g.smali`
-        // lines 146 and 149). The proxies are only logged for now — see [EcarxDimApi.DimCallbackHandler].
-        if (dimCallback == null) dimCallback = EcarxDimApi.registerInteractionCallback(interaction, "diplay")
+        // lines 146 and 149).
+        if (dimCallback == null) {
+            val main = Handler(Looper.getMainLooper())
+            dimCallback = EcarxDimApi.registerInteractionCallback(interaction, "diplay") { option ->
+                // Return to DIM before touching the bridge or its window owner.
+                main.post {
+                    synchronized(lock) {
+                        if (option !in 1..3 || option == presentationOption) return@synchronized
+                        val wasAllowed = platformAllowsProjection
+                        presentationOption = option
+                        if (platformAllowsProjection != wasAllowed) {
+                            presentationCountdown = 0
+                            if (routePanelWanted) clusterPresentationRequested?.invoke(platformAllowsProjection)
+                        }
+                    }
+                }
+            }
+        }
         val naviRef = navi
         if (naviRef != null && naviCallback == null) {
             naviCallback = EcarxDimApi.registerNavigationInteractionCallback(naviRef, "diplay")
@@ -473,7 +497,7 @@ internal object EcarxHudBridge {
      * [EcarxResult.ok] when enabling means "the watch owns delivery now", even if a DIM handle is
      * not ready. Disabling returns the immediate platform result but always clears the request.
      */
-    fun applyPresentation(show: Boolean, origin: String = ""): EcarxDimApi.EcarxResult = synchronized(lock) {
+    fun applyPresentation(show: Boolean, origin: String, fromSettings: Boolean): EcarxDimApi.EcarxResult = synchronized(lock) {
         // Who asked. The 18:24 report shows the mirror being turned *off* half a second after the
         // process started, while the settings screen held "on" — and nothing in this file can tell
         // the difference between the driver, a dialog that cancelled itself, and a switch the
@@ -482,6 +506,10 @@ internal object EcarxHudBridge {
         val app = context ?: return EcarxDimApi.EcarxResult.failed("DIM not initialized")
         // A current manual or route request supersedes startup recovery under the same lock.
         releaseStalePresentation = false
+        if (fromSettings && guidanceActive) {
+            routePanelWanted = show
+            clusterPresentationRequested?.invoke(show && platformAllowsProjection)
+        }
         EcarxOutputSettings.setPresentationSwitch(app, show)
         presentationWanted = show
         if (!show) {
@@ -492,7 +520,7 @@ internal object EcarxHudBridge {
             return result
         }
         if (!ecarxDetected) return EcarxDimApi.EcarxResult.failed("ECARX head unit not detected")
-        requestPresentationLocked()
+        if (platformAllowsProjection) requestPresentationLocked()
         EcarxDimApi.EcarxResult.ok("projection watch armed")
     }
 
@@ -583,10 +611,10 @@ internal object EcarxHudBridge {
      * Nothing on this platform reports that the projection took: `getShowPresentationOption()` is
      * the only read-back and it is `-1` on this head unit even while the cluster is mirroring
      * (probe v3/v4, nine reads), so a read-back loop would immediately give up. Re-sending the
-     * switch is idempotent and harmless, which is why the watch is unconditional instead.
+     * switch keeps projection alive while the latest platform option allows it.
      */
     private fun watchProjectionLocked() {
-        if (!presentationWanted) return
+        if (!presentationWanted || !platformAllowsProjection) return
         if (presentationCountdown > 0) {
             presentationCountdown -= 1
             return
@@ -701,7 +729,8 @@ internal object EcarxHudBridge {
             // stream instead of a scaled-down copy of the centre screen. Fired here and not from
             // the ticker so it lands with the first guidance frame, before the platform's mirror
             // has had time to paint a wrong-ratio picture on the same panel.
-            clusterPresentationRequested?.invoke(true)
+            routePanelWanted = true
+            clusterPresentationRequested?.invoke(platformAllowsProjection)
         }
     }
 
@@ -816,6 +845,7 @@ internal object EcarxHudBridge {
                 report("DIM guidance ended $lastGuidanceEnd")
                 // Hand the panel back: the presentation stops requesting the cluster stream, so the
                 // head unit's own instrument page returns instead of a frozen last map frame.
+                routePanelWanted = false
                 clusterPresentationRequested?.invoke(false)
             }
         } finally {

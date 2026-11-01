@@ -174,15 +174,13 @@ internal object EcarxDimApi {
      * `onDoInteractionAction ACTION_GET_FAVORITE`, i.e. the DIM asks the navigation app for data, it
      * does not only receive pushes. Without a registration those requests have no receiver here.
      *
-     * Nothing is interpreted yet: the handler logs every call it gets and answers with the return
-     * type's default value, so the first drive tells us which actions this head unit actually asks
-     * for instead of us guessing the set.
+     * The presentation option is forwarded to the panel owner. Other callbacks are logged.
      *
      * Returns the proxy to pass to `unregisterInteractionCallback`, or null when this head unit has
      * no such callback interface or the registration was refused.
      */
-    fun registerInteractionCallback(dim: Any, label: String): Any? =
-        registerCallback(dim, EcarxCapabilities.DIM_CALLBACK, "registerInteractionCallback", label, "dim")
+    fun registerInteractionCallback(dim: Any, label: String, onOption: (Int) -> Unit): Any? =
+        registerCallback(dim, EcarxCapabilities.DIM_CALLBACK, "registerInteractionCallback", label, "dim", onOption)
 
     /**
      * `INaviInteraction.registerNavigationInteractionCallback(INavigationInteractionCallback)` — the
@@ -199,10 +197,11 @@ internal object EcarxDimApi {
         method: String,
         label: String,
         scope: String,
+        onOption: ((Int) -> Unit)? = null,
     ): Any? {
         val itf = runCatching { Class.forName(interfaceName) }.getOrNull() ?: return null
         val proxy = runCatching {
-            Proxy.newProxyInstance(itf.classLoader, arrayOf(itf), DimCallbackHandler(label, scope))
+            Proxy.newProxyInstance(itf.classLoader, arrayOf(itf), DimCallbackHandler(label, scope, onOption))
         }.getOrElse {
             report("$scope callback proxy failed: ${describe(it)}")
             return null
@@ -763,15 +762,11 @@ internal object EcarxDimApi {
         }
     }
 
-    /**
-     * Receiver for the DIM's own calls (see [registerInteractionCallback]).
-     *
-     * It answers nothing useful on purpose: every call is logged with its name and arguments and
-     * the return value is the declared return type's default. That turns the first drive into an
-     * inventory of what this head unit asks for, which is the only way to learn the set — the
-     * interface is not in any ECARX SDK we have.
-     */
-    private class DimCallbackHandler(private val label: String, private val scope: String) : InvocationHandler {
+    private class DimCallbackHandler(
+        private val label: String,
+        private val scope: String,
+        private val onOption: ((Int) -> Unit)?,
+    ) : InvocationHandler {
         override fun invoke(proxy: Any, method: Method, args: Array<out Any?>?): Any? {
             when (method.name) {
                 "toString" -> return "EcarxDimCallback($scope/$label)"
@@ -779,6 +774,9 @@ internal object EcarxDimApi {
                 "equals" -> return proxy === args?.firstOrNull()
             }
             EcarxDimApi.report("callback $scope.$label ${method.name}(${java.util.Arrays.toString(args)})")
+            if (method.name == "onShowPresentationOptionChanged") {
+                (args?.singleOrNull() as? Int)?.let { onOption?.invoke(it) }
+            }
             return EcarxDimApi.defaultValue(method.returnType)
         }
     }
