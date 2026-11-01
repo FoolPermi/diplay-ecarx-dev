@@ -16,6 +16,7 @@ DiPlay 让你在领克车机上使用 iPhone 的导航、音乐、Siri 和通话
 | 无线连接 | 在连接设置中选择车机热点、Wi-Fi Direct 或已有 Wi-Fi，按提示完成配置 |
 | 开机自动连接 | **设置 → 连接 → 自动连接**，开启「车机启动后打开」和「打开 DiPlay 时连接」 |
 | 方向盘语音键叫 Siri | **设置 → 车辆 → 方向盘按键**，开启「方向盘唤醒 Siri」；直接接管模式选短按／长按，HY 代理模式选 155/156 或 312/303 |
+| 在车机上接打电话 | 无需设置：来电显示在车机电话界面，可接听可挂断；通话中音乐与导航播报自动暂停，挂断后恢复（实车已验证） |
 
 **文中「HY」指 HYWebview（`com.hyphp.hywebview`），适配版本 3.6.1。** DiPlay 直接接管模式下，请关闭 HY 的媒体接管及同一语音键的方控接管；HY 代理模式请在两边选择相同的 Siri 模拟按键。
 
@@ -45,6 +46,7 @@ Where each feature is enabled, what it needs first, and how to tell it works: [f
 | Wireless connection | Choose the car hotspot, Wi-Fi Direct or existing Wi-Fi in connection setup, then follow the prompts |
 | Automatic connection at startup | **Settings → Connection → Automatic connection**: enable “Open after the car starts” and “Connect when DiPlay opens” |
 | Siri from the wheel | **Settings → Vehicle → Steering-wheel keys**: enable “Wake Siri with the voice key”; direct mode picks short or long press, HY proxy picks 155/156 or 312/303 |
+| Calls from the wheel unit | Nothing to set up: incoming calls show on the car's phone screen and can be answered or hung up there; music and navigation prompts pause during a call and resume after it ends (verified on the vehicle) |
 
 **“HY” in this document means HYWebview (`com.hyphp.hywebview`), version 3.6.1.** In direct mode, disable HY's media takeover and its mapping for the same voice key. In HY mode, select the same Siri simulated-key pair in both apps.
 

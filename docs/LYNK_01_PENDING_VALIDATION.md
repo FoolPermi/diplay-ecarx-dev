@@ -6,6 +6,7 @@
 
 ## 最新反馈与待验收项
 
+- **已定位（待领克 01 复现确认）**：先用 USB 连过再改走无线会一直卡住，根因在 iPhone 侧——本车记录首次由有线建立时 iOS 回 `0x4E0D WirelessCarPlayUpdate available=false` 并拒绝无线。DiPlay 侧 `7e9e21c1` 已做到 60 秒内明确提示、不重试、取消干净，但无法自动绕过，需车主在 iPhone 删记录后先走一次无线。证据来自小米 8 + 两台 iPhone 对照日志。
 - 报告 11 确认 HY 模式下 DiPlay 的 Android 媒体会话已激活，但系统第一项是无播放状态的 `ecarx.xsf.mediacenter`，DiPlay 排第二，当前进程媒体命令为 0。HY dump 的默认控制路径取第一项；提前注册尚未解决首次方控播放。
 - 用户已实车确认独立 `DiPlay Siri` 应用在 HY“打开应用”路径下可唤起 Siri。
 - 用户新增反馈：未开 CarPlay 悬浮窗时，切后台后仪表投屏消失；路线更新后可能恢复。需分别验证页面销毁与路线数据超时，不能将日志中的明确 `no-route` 当作超时证据。
