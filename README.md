@@ -10,16 +10,16 @@ DiPlay 让你在领克车机上使用 iPhone 的导航、音乐、Siri 和通话
 | --- | --- |
 | 仪表和 HUD 导航提示 | **设置 → 导航 → 亿咖通导航**，开启「仪表导航」 |
 | 车道指引 | 同一页面开启「仪表车道指引」 |
-| 歌曲信息和封面 | 同一页面开启「仪表媒体卡片」 |
+| 歌曲信息和封面 | **设置 → 音频 → 车机媒体集成**，选择「DiPlay 直接接管」或「HY 代理」，歌曲信息随所选后端输出 |
 | 日夜模式跟随车辆 | **设置 → 显示 → 显示与性能**，把「CarPlay 日夜模式」设为「跟随车辆」 |
 | 音乐走 CarPlay、保留蓝牙电话 | **设置 → 音频 → 蓝牙音频**，开启「CarPlay 期间停用蓝牙媒体」，关闭「通过车辆蓝牙播放 CarPlay 音频」 |
 | 无线连接 | 在连接设置中选择车机热点、Wi-Fi Direct 或已有 Wi-Fi，按提示完成配置 |
 | 开机自动连接 | **设置 → 连接 → 自动连接**，开启「车机启动后打开」和「打开 DiPlay 时连接」 |
-| 方向盘语音键叫 Siri | 无需设置：CarPlay 连上后短按即生效。**自定义按键本版未适配，请保持默认** |
+| 方向盘语音键叫 Siri | **设置 → 车辆 → 方向盘按键**，开启「方向盘唤醒 Siri」；直接接管模式选短按／长按，HY 代理模式选 155/156 或 312/303 |
 
-**使用 HY 时，请关闭 HY 的方控接管。**
+**文中「HY」指 HYWebview（`com.hyphp.hywebview`），适配版本 3.6.1。** DiPlay 直接接管模式下，请关闭 HY 的媒体接管及同一语音键的方控接管；HY 代理模式请在两边选择相同的 Siri 模拟按键。
 
-**方向盘语音键**：CarPlay 连上后自动接管**短按**，不需要开关、不需要学习；断开即解绑。生效需要同时满足：车机被识别为领克/吉利、媒体接管方为 ECARX、当前不在通话中。用 HY（媒体接管方 = Android）时按键交给 HY。自定义按键学习本版未适配。
+**方向盘 Siri**：在「设置 → 车辆 → 方向盘按键」用总开关开启或关闭。DiPlay 直接接管时选择短按／长按；HY 代理时选择 155/156 或 312/303，并在 HYWebview 的方向盘设置里配置相同模拟按键。原有 Siri 桥接入口继续可用，不受按键总开关影响。不提供按键学习；未连接 CarPlay 或通话中不接管。
 
 只显示导航提示和歌曲信息时，保持「整屏镜像到仪表」关闭。设置修改后，按界面提示重新连接。
 
@@ -39,16 +39,16 @@ Where each feature is enabled, what it needs first, and how to tell it works: [f
 | --- | --- |
 | Cluster and HUD navigation | **Settings → Navigation → ECARX navigation**: enable “Navigation on the instrument cluster” |
 | Lane guidance | On the same page, enable “Cluster lane guidance” |
-| Song information and artwork | On the same page, enable “Cluster media card” |
+| Song information and artwork | **Settings → Audio → Vehicle media integration**: choose “DiPlay direct” or “HY proxy”; song data follows the backend |
 | Day/night following the vehicle | **Settings → Display → Display and performance**: set “CarPlay day/night mode” to “Follow the vehicle” |
 | Music through CarPlay, keep Bluetooth calls | **Settings → Audio → Bluetooth audio**: enable “Pause Bluetooth media for CarPlay” and disable “CarPlay audio over the car's Bluetooth” |
 | Wireless connection | Choose the car hotspot, Wi-Fi Direct or existing Wi-Fi in connection setup, then follow the prompts |
 | Automatic connection at startup | **Settings → Connection → Automatic connection**: enable “Open after the car starts” and “Connect when DiPlay opens” |
-| Siri from the wheel | Nothing to set up: the **short press** works once CarPlay is connected, and **Settings → Vehicle → Steering-wheel keys → Wake Siri with the voice key** switches it to a long press |
+| Siri from the wheel | **Settings → Vehicle → Steering-wheel keys**: enable “Wake Siri with the voice key”; direct mode picks short or long press, HY proxy picks 155/156 or 312/303 |
 
-**In direct mode, disable HY media takeover and its mapping for the same voice key. In HY mode, select the same Siri simulated-key pair in both apps.**
+**“HY” in this document means HYWebview (`com.hyphp.hywebview`), version 3.6.1.** In direct mode, disable HY's media takeover and its mapping for the same voice key. In HY mode, select the same Siri simulated-key pair in both apps.
 
-**Wheel Siri:** under **Settings → Vehicle → Steering-wheel keys**, the master switch controls key activation. Direct mode offers short/long press; HY mode offers 155/156 or 312/303, matching the simulated-key option in HY. Siri shortcuts remain available with the key switch off. No key learning is offered. Keys are left alone without an active CarPlay session or during calls. Media integration is under **Settings → Audio**.
+**Wheel Siri:** under **Settings → Vehicle → Steering-wheel keys**, the master switch controls key activation. Direct mode offers short/long press; HY mode offers 155/156 or 312/303, matching the simulated-key option in HYWebview 3.6.1. Siri shortcuts remain available with the key switch off. No key learning is offered. Keys are left alone without an active CarPlay session or during calls. Media integration is under **Settings → Audio → Vehicle media integration**.
 
 Keep “Mirror the full screen to the instrument cluster” off when you only want navigation and song information. After changing settings, reconnect when prompted.
 
