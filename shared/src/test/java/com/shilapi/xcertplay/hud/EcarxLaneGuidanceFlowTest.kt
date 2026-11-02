@@ -551,18 +551,18 @@ class EcarxLaneGuidanceFlowTest {
         assertTrue(calls("setPresentationToDimSwitch").isEmpty())
     }
 
-    @Test fun hidingTheMapPreservesNavigationAndLanesWithAndWithoutAnUnconsumedResend() {
+    @Test fun hidingTheMapPreservesNavigationAndLanesWithAndWithoutNewPhoneData() {
         initialize(); maneuver(); guidance()
         send(0x5204) {
             u16(0, 42); u16(1, 0); group(2) { u16(0, 0); u8(1, 2); i16(2, 90) }
         }
         val lane = calls("updateLaneInfo").last().payload["lanes"]
-        for (consumeResend in listOf(false, true)) {
+        for (newPhoneData in listOf(false, true)) {
             DimInteraction.instance().callback.onShowPresentationOptionChanged(2)
             shadowOf(Looper.getMainLooper()).idle()
             assertTrue(NavigationOutputs.requestPresentation(context, true, "ready surface"))
-            if (consumeResend) guidance(distance = 300)
-            assertEquals(!consumeResend, DimInteraction.navi.resendOngoing)
+            if (newPhoneData) guidance(distance = 300)
+            assertFalse(DimInteraction.navi.resendOngoing)
             DimInteraction.instance().callback.onShowPresentationOptionChanged(3)
             shadowOf(Looper.getMainLooper()).idle()
             assertTrue(NavigationOutputs.requestPresentation(context, false, "surface detached"))
@@ -588,6 +588,95 @@ class EcarxLaneGuidanceFlowTest {
         NavigationOutputs.requestPresentation(context, false, "route ended")
         assertFalse(DimInteraction.navi.handlerNavigationActive)
         assertEquals(restored, calls("updateMuteState").size)
+        assertNull(calls("updateLaneInfo").last().payload["lanes"])
+    }
+
+    @Test fun repeatedMapDeliveryRestoresTheFinalEventAndLiveLaneData() {
+        initialize(); maneuver(); guidance()
+        send(0x5204) {
+            u16(0, 42); u16(1, 0); group(2) { u16(0, 0); u8(1, 2); i16(2, 90) }
+        }
+        assertTrue(NavigationOutputs.requestPresentation(context, true, "first surface"))
+        guidance(distance = 349)
+        assertEquals("ongoingNavi", DimInteraction.navi.navigationEvents.last())
+        for (distance in listOf(125, 124, 123)) {
+            DimInteraction.instance().callback.onShowPresentationOptionChanged(3)
+            shadowOf(Looper.getMainLooper()).idle()
+            assertTrue(NavigationOutputs.requestPresentation(context, false, "surface detached"))
+            guidance(distance = distance)
+            send(0x5204) {
+                u16(0, 42); u16(1, 0); group(2) { u16(0, 0); u8(1, 2); i16(2, -90) }
+            }
+            assertTrue(EcarxHudBridge.isActive())
+            assertFalse(panelRequests.last())
+            assertEquals(distance, calls("updateDistanceToNextGuidancePoint").last().payload["meters"])
+            val lane = calls("updateLaneInfo").last().payload["lanes"]
+            assertEquals(16, ((lane as List<*>).single() as Map<*, *>)["iconId"])
+            assertEquals("ongoingNavi", DimInteraction.navi.navigationEvents.last())
+            assertTrue(calls("notifyTurnByTurnStopped").isEmpty())
+
+            DimInteraction.instance().callback.onShowPresentationOptionChanged(2)
+            shadowOf(Looper.getMainLooper()).idle()
+            val start = DimInteraction.navi.navigationEvents.size
+            val traceStart = FixtureLog.snapshot().size
+            assertTrue(NavigationOutputs.requestPresentation(context, true, "replacement surface"))
+            guidance(distance = distance) // Unchanged phone data must not be required to repair DIM state.
+            val events = DimInteraction.navi.navigationEvents.drop(start)
+            assertEquals("firstFrameReady", events.first())
+            assertEquals("ongoingNavi", events.last())
+            assertFalse(events.any { it == "idle" || it == "naviAppOff" })
+            assertEquals(lane, calls("updateLaneInfo").last().payload["lanes"])
+            val trace = FixtureLog.snapshot().drop(traceStart)
+            assertTrue(trace.indexOf("setPresentationToDimSwitch") < trace.indexOf("navigation:firstFrameReady"))
+            assertTrue(trace.indexOf("navigation:firstFrameReady") < trace.indexOf("navigation:ongoingNavi"))
+            assertTrue(trace.lastIndexOf("navigation:ongoingNavi") < trace.lastIndexOf("updateLaneInfo"))
+            repeat(12) {
+                tick()
+                assertEquals("ongoingNavi", DimInteraction.navi.navigationEvents.last())
+            }
+        }
+    }
+
+    @Test fun routeEndClosesNavigationEvenWhenTheMapIsAlreadyHidden() {
+        initialize()
+        val finalEvents = linkedMapOf<Int, String>()
+        for (endState in listOf(0, 2)) {
+            DimInteraction.instance().callback.onShowPresentationOptionChanged(2)
+            shadowOf(Looper.getMainLooper()).idle()
+            maneuver(); guidance()
+            assertTrue(NavigationOutputs.requestPresentation(context, true, "surface ready"))
+            DimInteraction.instance().callback.onShowPresentationOptionChanged(3)
+            shadowOf(Looper.getMainLooper()).idle()
+            assertTrue(NavigationOutputs.requestPresentation(context, false, "surface detached"))
+            val start = DimInteraction.navi.navigationEvents.size
+            val traceStart = FixtureLog.snapshot().size
+            send(0x5201) { u8(1, endState) }
+            assertFalse(EcarxHudBridge.isActive())
+            assertFalse(DimInteraction.navi.ongoingNavigationActive)
+            assertNull(calls("updateLaneInfo").last().payload["lanes"])
+            val events = DimInteraction.navi.navigationEvents.drop(start)
+            assertEquals("idle", events.first())
+            assertFalse(events.contains("ongoingNavi"))
+            finalEvents[endState] = events.last()
+            val trace = FixtureLog.snapshot().drop(traceStart)
+            assertTrue(trace.indexOf("navigation:idle") < trace.indexOf("notifyTurnByTurnStopped"))
+            assertTrue(trace.lastIndexOf("updateLaneInfo") < trace.lastIndexOf("navigation:naviAppOff"))
+            val count = DimInteraction.navi.navigationEvents.size
+            repeat(12) { tick() }
+            assertEquals(count, DimInteraction.navi.navigationEvents.size)
+        }
+        assertEquals(mapOf(0 to "naviAppOff", 2 to "naviAppOff"), finalEvents)
+    }
+
+    @Test fun routeEndDoesNotWaitForTheWindowsSurfaceTeardown() {
+        initialize(); maneuver(); guidance()
+        assertTrue(NavigationOutputs.requestPresentation(context, true, "surface ready"))
+        send(0x5201) { u8(1, 0) }
+        assertFalse(panelRequests.last())
+        assertEquals("naviAppOff", DimInteraction.navi.navigationEvents.last())
+        assertTrue(NavigationOutputs.requestPresentation(context, false, "late surface detached"))
+        assertEquals("naviAppOff", DimInteraction.navi.navigationEvents.last())
+        assertFalse(DimInteraction.navi.handlerNavigationActive)
         assertNull(calls("updateLaneInfo").last().payload["lanes"])
     }
 
@@ -783,7 +872,7 @@ class EcarxLaneGuidanceFlowTest {
         assertEquals(listOf(true, false, true, false, true, false), panelRequests)
         assertEquals(3, calls("notifyTurnByTurnStarted").size)
         assertEquals(3, calls("notifyTurnByTurnStopped").size)
-        assertTrue(calls("setPresentationToDimSwitch").isEmpty())
+        assertEquals(listOf(false, false, false), calls("setPresentationToDimSwitch").map { it.payload["show"] })
         assertEquals(3, reports.count { it.startsWith("DIM lifecycle start status=1 aggregate=ok notify=ok") })
         assertEquals(3, reports.count { it.startsWith("DIM lifecycle stop status=0 aggregate=ok notify=ok") })
         assertEquals(6, reports.count { it.startsWith("DIM lifecycle") && it.contains("method not found") })
@@ -803,7 +892,7 @@ class EcarxLaneGuidanceFlowTest {
         assertTrue(names().lastIndexOf("notifyNavigationStatus") < names().lastIndexOf("notifyTurnByTurnStopped"))
         maneuver(); guidance()
         assertEquals(listOf(1, 0, 1), calls("notifyNavigationStatus").map { it.payload["status"] })
-        assertTrue(calls("setPresentationToDimSwitch").isEmpty())
+        assertEquals(listOf(false), calls("setPresentationToDimSwitch").map { it.payload["show"] })
     }
 
     @Test fun guidancePausesFactoryNavigationBeforeFirstPublishAndRestoresAcrossAllExitPaths() {
