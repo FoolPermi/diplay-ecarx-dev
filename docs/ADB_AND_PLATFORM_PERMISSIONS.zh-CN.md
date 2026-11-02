@@ -1,6 +1,6 @@
 # 753 车机权限与无 ADB 实施清单
 
-更新：2026-11-02。需求与后续验收统一维护于 [issue #21](https://github.com/jianyun8023/diplay-ecarx/issues/21)。本轮从 `origin/dev` 的 `a7d93709` 新建独立 worktree 实施。
+更新：2026-11-02。需求与后续验收统一维护于 [issue #21](https://github.com/jianyun8023/diplay-ecarx/issues/21)。本轮从 `origin/dev` 的 `a7d93709` 新建独立 worktree 实施，随后 rebase 到包含 #19、#22 的 `af00f223`。ADB 移除测试包使用 versionCode **114**；另一会话的 v115 不属于本轮产物。
 
 ## 1. 正式环境与结论
 
