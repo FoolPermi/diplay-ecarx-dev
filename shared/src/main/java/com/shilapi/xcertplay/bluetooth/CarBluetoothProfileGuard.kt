@@ -43,6 +43,7 @@ public object CarBluetoothProfileGuard {
     private const val KEY_MEDIA_ONLY = "yield_media_only"
     private const val KEY_MEDIA_POLICY = "media_original_policy"
     private const val KEY_MEDIA_CONNECTED = "media_was_connected"
+    private const val KEY_MEDIA_CONNECTED_TARGETS = "media_connected_targets"
     private const val KEY_ADAPTER_DELAY_SECONDS = "adapter_delay_seconds"
 
     /** The adapter-off fallback delay, in seconds. The settings stepper writes it. */
@@ -56,10 +57,13 @@ public object CarBluetoothProfileGuard {
     private const val MODE_ADAPTER = "adapter"
     private const val MODE_MEDIA = "media"
 
-    // Only legacy link recovery uses both phone-side profiles. New media yield never arms reassert.
+    // Only legacy link recovery uses both phone-side profiles.
     private const val REASSERT_PERIOD_MILLIS = 30_000L
     private const val REDROP_THROTTLE_MILLIS = 3_000L
     private const val PROFILE_TIMEOUT_SECONDS = 5L
+    private const val MEDIA_RETRY_MILLIS = 1_000L
+    private const val MEDIA_MAX_RETRIES = 2
+    private const val ACTION_SINK_STATE = "android.bluetooth.a2dp-sink.profile.action.CONNECTION_STATE_CHANGED"
 
     /** `BluetoothProfile.CONNECTION_POLICY_*`; `setPriority`'s `PRIORITY_OFF`/`ON` share the values. */
     private const val POLICY_FORBIDDEN = 0
@@ -96,7 +100,8 @@ public object CarBluetoothProfileGuard {
         val log: (String) -> Unit,
         val mediaOnly: Boolean = false,
     ) {
-        var mediaAttempted = false // guarded by lock; handoff and session-active can both call apply.
+        var mediaSettled = false // Only a confirmed disconnect settles a media yield.
+        var mediaRetries = 0 // guarded by lock; new connection events start a fresh bounded attempt.
         var handles: List<Handle>? = null
         var targets: List<BluetoothDevice> = emptyList()
     }
@@ -162,6 +167,9 @@ public object CarBluetoothProfileGuard {
         val delay = if (mediaOnly) 0L else adapterDelaySeconds(app) * 1_000L
         synchronized(lock) {
             pending?.cancel(false)
+            reassert?.cancel(false)
+            reassert = null
+            unregisterWatcher(app)
             ownershipRevision++
             recoveryPending = false
             session = state
@@ -197,9 +205,9 @@ public object CarBluetoothProfileGuard {
             pending = null
             reassert?.cancel(false)
             reassert = null
+            unregisterWatcher(app)
             session.also { session = null } to ownershipRevision
         }
-        unregisterWatcher(app)
         if (state == null && !applied(app)) {
             synchronized(lock) { if (ownershipRevision == revision) recoveryPending = false }
             return
@@ -315,6 +323,8 @@ public object CarBluetoothProfileGuard {
     // ------------------------------------------------------------------ the drop
 
     private fun apply(state: Session) {
+        if (synchronized(lock) { session !== state }) return
+        if (state.mediaOnly) armMediaWatcher(state)
         val adapter = adapter(state.context)
         if (adapter == null) {
             state.log("BT guard: no Bluetooth adapter on this head unit")
@@ -351,8 +361,7 @@ public object CarBluetoothProfileGuard {
     /** No HFP calls, adapter power changes, guessed Binder services, or other paired phones. */
     private fun applyMediaOnly(state: Session, adapter: BluetoothAdapter) {
         synchronized(lock) {
-            if (session !== state || state.mediaAttempted) return
-            state.mediaAttempted = true
+            if (session !== state || state.mediaSettled) return
         }
         val device = runCatching {
             adapter.bondedDevices.firstOrNull { it.address.equals(state.peerAddress, ignoreCase = true) }
@@ -361,7 +370,11 @@ public object CarBluetoothProfileGuard {
             state.log("BT guard media: selected paired iPhone unavailable; unchanged")
             return
         }
-        val proxy = proxyFor(state.context, adapter, A2dpSinkPolicy.PROFILE_ID, state.log) ?: return
+        val proxy = proxyFor(state.context, adapter, A2dpSinkPolicy.PROFILE_ID, state.log)
+        if (proxy == null) {
+            retryMedia(state)
+            return
+        }
         try {
             val access = A2dpSinkPolicy.from(proxy, state.log)
             if (access == null) {
@@ -371,12 +384,14 @@ public object CarBluetoothProfileGuard {
             synchronized(lock) {
                 if (session !== state) return
                 val prefs = preferences(state.context)
-                val ownsMedia = applied(state.context) && appliedMode(state.context) == MODE_MEDIA &&
-                    storedTargets(state.context) == listOf(device.address)
-                if (applied(state.context) && !ownsMedia) {
+                val hasRecovery = applied(state.context)
+                if (hasRecovery && (appliedMode(state.context) != MODE_MEDIA ||
+                    prefs.getInt(KEY_MEDIA_POLICY, -1) != POLICY_ALLOWED)) {
                     state.log("BT guard media: previous recovery pending; unchanged")
                     return
                 }
+                val addresses = if (hasRecovery) storedTargets(state.context) else emptyList()
+                val ownsMedia = device.address in addresses
                 val original = access.read(device)
                 val connection = access.connectionState(device)
                 // The API 28 setter can restore only OFF/ON, not AUTO_CONNECT=1000 or unknown=-1.
@@ -384,16 +399,23 @@ public object CarBluetoothProfileGuard {
                     connection !in listOf(BluetoothProfile.STATE_CONNECTED, BluetoothProfile.STATE_DISCONNECTED)) {
                     state.log("BT guard media: original policy/state not safely restorable" +
                         " policy=${original ?: "unreadable"} state=${connection ?: "unreadable"}; unchanged")
+                    if (original in listOf(POLICY_FORBIDDEN, POLICY_ALLOWED) &&
+                        connection in listOf(BluetoothProfile.STATE_CONNECTING, BluetoothProfile.STATE_DISCONNECTING)) retryMedia(state)
                     return
                 }
                 if (!ownsMedia && original == POLICY_FORBIDDEN) {
                     state.log("BT guard media: already disabled by user; unchanged")
                     return
                 }
-                if (!ownsMedia && !prefs.edit().putBoolean(KEY_APPLIED, true)
-                    .putString(KEY_APPLIED_MODE, MODE_MEDIA).putString(KEY_APPLIED_TARGETS, device.address)
-                    .putInt(KEY_MEDIA_POLICY, original!!)
-                    .putBoolean(KEY_MEDIA_CONNECTED, connection == BluetoothProfile.STATE_CONNECTED).commit()) {
+                val connected = mediaConnectedTargets(state.context).toMutableSet()
+                if (!ownsMedia && connection == BluetoothProfile.STATE_CONNECTED) connected.add(device.address)
+                val targets = if (ownsMedia) addresses else addresses + device.address
+                // commit() may fail after updating memory; every retry must make the journal durable before mutation.
+                // All owned targets started at ALLOWED; user-disabled/unknown policies never enter this journal.
+                if (!prefs.edit().putBoolean(KEY_APPLIED, true).putString(KEY_APPLIED_MODE, MODE_MEDIA)
+                    .putString(KEY_APPLIED_TARGETS, targets.joinToString(","))
+                    .putInt(KEY_MEDIA_POLICY, POLICY_ALLOWED).putStringSet(KEY_MEDIA_CONNECTED_TARGETS, connected)
+                    .putBoolean(KEY_MEDIA_CONNECTED, targets.first() in connected).commit()) {
                     state.log("BT guard media: recovery state could not be saved; unchanged")
                     return
                 }
@@ -401,13 +423,53 @@ public object CarBluetoothProfileGuard {
                 val policy = access.read(device)
                 val disconnect = if (accepted && policy == POLICY_FORBIDDEN &&
                     access.connectionState(device) == BluetoothProfile.STATE_CONNECTED) access.disconnect(device) else false
+                val finalState = access.connectionState(device)
+                state.mediaSettled = accepted && policy == POLICY_FORBIDDEN && finalState == BluetoothProfile.STATE_DISCONNECTED
                 state.log("BT guard media: A2DP_SINK policyAccepted=$accepted policyNow=${policy ?: "unknown"}" +
-                    " disconnectRequested=$disconnect state=${access.connectionState(device) ?: "unknown"}" +
+                    " disconnectRequested=$disconnect state=${finalState ?: "unknown"} mediaDisconnected=${state.mediaSettled}" +
                     " phoneProfile=untouched adapterPower=untouched")
+                if (accepted && policy == POLICY_FORBIDDEN && !state.mediaSettled) retryMedia(state)
             }
         } finally {
             runCatching { adapter.closeProfileProxy(A2dpSinkPolicy.PROFILE_ID, proxy) }
         }
+    }
+
+    private fun retryMedia(state: Session) = synchronized(lock) {
+        if (session !== state || state.mediaSettled || state.mediaRetries >= MEDIA_MAX_RETRIES) return
+        state.mediaRetries++
+        pending?.cancel(false)
+        pending = worker.schedule({ apply(state) }, MEDIA_RETRY_MILLIS, TimeUnit.MILLISECONDS)
+    }
+
+    private fun armMediaWatcher(state: Session): Unit = synchronized(lock) {
+        if (session !== state || watcher != null) return
+        val receiver = object : BroadcastReceiver() {
+            @Suppress("DEPRECATION")
+            override fun onReceive(context: Context, intent: Intent) {
+                val relevant = when (intent.action) {
+                    ACTION_SINK_STATE -> intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE)
+                        ?.address?.equals(state.peerAddress, ignoreCase = true) == true
+                    BluetoothAdapter.ACTION_STATE_CHANGED ->
+                        intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, -1) == BluetoothAdapter.STATE_ON
+                    else -> false
+                }
+                if (!relevant) return
+                synchronized(lock) {
+                    if (session !== state) return
+                    state.mediaSettled = false
+                    state.mediaRetries = 0
+                    pending?.cancel(false)
+                    pending = worker.schedule({ apply(state) }, 0, TimeUnit.MILLISECONDS)
+                }
+            }
+        }
+        val filter = IntentFilter(ACTION_SINK_STATE).apply { addAction(BluetoothAdapter.ACTION_STATE_CHANGED) }
+        runCatching {
+            // Bluetooth broadcasts may come from the privileged Bluetooth UID rather than system_server.
+            registerReceiverCompat(state.context, receiver, filter, exported = true)
+        }.onSuccess { watcher = receiver }
+            .onFailure { state.log("BT guard media: profile broadcasts not watched ${it.javaClass.simpleName}") }
     }
 
     @Suppress("DEPRECATION")
@@ -462,7 +524,7 @@ public object CarBluetoothProfileGuard {
 
     private fun reassert(reason: String?) {
         val state = synchronized(lock) { session } ?: return
-        if (state.adapterMode) return
+        if (state.adapterMode || state.mediaOnly) return
         if (SystemClock.elapsedRealtime() - lastDropAt < REDROP_THROTTLE_MILLIS) return
         val adapter = adapter(state.context) ?: return
         if (!adapter.isEnabled) return
@@ -535,7 +597,7 @@ public object CarBluetoothProfileGuard {
             return
         }
         if (mode == MODE_MEDIA) {
-            restoreMediaOnly(context, adapter, ::current, log)
+            restoreMediaOnly(context, adapter, state?.peerAddress, ::current, log)
             return
         }
         if (mode == MODE_ADAPTER) {
@@ -589,16 +651,15 @@ public object CarBluetoothProfileGuard {
         log(line.append(" devices=").append(devices.size).toString())
     }
 
-    private fun restoreMediaOnly(context: Context, adapter: BluetoothAdapter, current: () -> Boolean,
+    private fun restoreMediaOnly(context: Context, adapter: BluetoothAdapter, preferredAddress: String?, current: () -> Boolean,
         log: (String) -> Unit) {
         val prefs = preferences(context)
-        val address = storedTargets(context).singleOrNull()
+        val addresses = storedTargets(context)
         val original = prefs.getInt(KEY_MEDIA_POLICY, -1)
-        if (address == null || original != POLICY_ALLOWED || !adapter.isEnabled) {
+        if (addresses.isEmpty() || original != POLICY_ALLOWED || !adapter.isEnabled) {
             log("BT guard media restore: saved policy or radio unavailable; keeping recovery pending")
             return
         }
-        val device = remoteDevice(adapter, address) ?: return
         val proxy = proxyFor(context, adapter, A2dpSinkPolicy.PROFILE_ID, log) ?: return
         try {
             val access = A2dpSinkPolicy.from(proxy, log)
@@ -606,28 +667,43 @@ public object CarBluetoothProfileGuard {
                 log("BT guard media restore: policy API unavailable; keeping recovery pending")
                 return
             }
-            synchronized(lock) {
+            // The current phone can already have an older record from a previous session.
+            val preferred = addresses.firstOrNull { it.equals(preferredAddress, ignoreCase = true) }
+            val order = addresses.filter { it != preferred } + listOfNotNull(preferred)
+            for (address in order.asReversed()) synchronized(lock) {
                 if (!current()) return
+                val device = remoteDevice(adapter, address) ?: return@synchronized
                 // A single-link Sink may displace another phone when policy/connect is restored.
                 val otherMedia = runCatching {
-                    proxy.connectedDevices.any { !it.address.equals(address, ignoreCase = true) }
+                    proxy.getDevicesMatchingConnectionStates(intArrayOf(BluetoothProfile.STATE_CONNECTED,
+                        BluetoothProfile.STATE_CONNECTING, BluetoothProfile.STATE_DISCONNECTING))
+                        .any { !it.address.equals(address, ignoreCase = true) }
                 }.getOrNull()
                 if (otherMedia != false) {
                     log("BT guard media restore: another media device or unreadable connections; keeping recovery pending")
-                    return
+                    return@synchronized
                 }
                 val policy = access.read(device)
                 if (policy != POLICY_FORBIDDEN && policy != original) {
                     log("BT guard media restore: policy unreadable or changed; keeping recovery pending")
-                    return
+                    return@synchronized
                 }
                 val accepted = policy == original || access.write(device, original)
                 val confirmed = accepted && access.read(device) == original
                 // Only restore a connection we actually interrupted, never a user-disabled media link.
                 val connect = if (confirmed && policy == POLICY_FORBIDDEN &&
-                    prefs.getBoolean(KEY_MEDIA_CONNECTED, false) &&
+                    address in mediaConnectedTargets(context) &&
                     access.connectionState(device) == BluetoothProfile.STATE_DISCONNECTED) access.connect(device) else false
-                if (confirmed) clearApplied(context)
+                if (confirmed) {
+                    val remaining = storedTargets(context) - address
+                    if (remaining.isEmpty()) clearApplied(context)
+                    else {
+                        val connected = mediaConnectedTargets(context) - address
+                        prefs.edit().putString(KEY_APPLIED_TARGETS, remaining.joinToString(","))
+                            .putStringSet(KEY_MEDIA_CONNECTED_TARGETS, connected)
+                            .putBoolean(KEY_MEDIA_CONNECTED, remaining.first() in connected).commit()
+                    }
+                }
                 log("BT guard media restore: policyRestored=$confirmed connectRequested=$connect" +
                     " state=${access.connectionState(device) ?: "unknown"} phoneProfile=untouched" +
                     if (confirmed) "" else "; keeping recovery pending")
@@ -643,9 +719,10 @@ public object CarBluetoothProfileGuard {
     }
 
     @Suppress("UnspecifiedRegisterReceiverFlag")
-    private fun registerReceiverCompat(context: Context, receiver: BroadcastReceiver, filter: IntentFilter) {
+    private fun registerReceiverCompat(context: Context, receiver: BroadcastReceiver, filter: IntentFilter,
+        exported: Boolean = false) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            context.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            context.registerReceiver(receiver, filter, if (exported) Context.RECEIVER_EXPORTED else Context.RECEIVER_NOT_EXPORTED)
         } else {
             context.registerReceiver(receiver, filter)
         }
@@ -866,6 +943,12 @@ public object CarBluetoothProfileGuard {
             ?.filter { it.isNotBlank() }
             .orEmpty()
 
+    private fun mediaConnectedTargets(context: Context): Set<String> {
+        val prefs = preferences(context)
+        return prefs.getStringSet(KEY_MEDIA_CONNECTED_TARGETS, null)
+            ?: if (prefs.getBoolean(KEY_MEDIA_CONNECTED, false)) storedTargets(context).toSet() else emptySet()
+    }
+
     private fun clearApplied(context: Context) {
         preferences(context).edit()
             .putBoolean(KEY_APPLIED, false)
@@ -873,6 +956,7 @@ public object CarBluetoothProfileGuard {
             .remove(KEY_APPLIED_TARGETS)
             .remove(KEY_MEDIA_POLICY)
             .remove(KEY_MEDIA_CONNECTED)
+            .remove(KEY_MEDIA_CONNECTED_TARGETS)
             .apply()
     }
 
