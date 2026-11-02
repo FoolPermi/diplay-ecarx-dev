@@ -58,6 +58,10 @@ below: 2,679 tests passed, one existing test skipped, all three lint tasks and D
 
 ## Host unit tests
 
+For the ECARX microphone lifecycle and the target server's unsupported arbitration, see the
+[SDK context and vehicle checks](ECARX_SDK_CONTEXT.zh-CN.md). A successful SDK initialization
+or a simulated microphone grant does not establish support on this head unit.
+
 `common` loads Mockito as a Java agent when its test JVM starts, using the same version as
 `testImplementation`. Gradle resolves the agent path and tracks it as a test input; no local
 init script or dynamic agent attachment is required on JDK 25.

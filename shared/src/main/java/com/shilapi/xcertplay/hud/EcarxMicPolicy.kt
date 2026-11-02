@@ -1,45 +1,30 @@
 package com.shilapi.xcertplay.hud
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
-import java.lang.reflect.InvocationHandler
-import java.lang.reflect.Method
 import java.lang.reflect.Proxy
+import java.util.concurrent.atomic.AtomicBoolean
 
-/**
- * Microphone arbitration through the target firmware's GKUI Policy API.
- * The recovered SDK is retained separately and not used by the application yet.
- * Reflection keeps ordinary Android recording without arbitration when this API is absent.
- * `isNeedrequestMic` belongs to the HY application wrapper, not the vendor interface.
- */
+/** GKUI Policy lifecycle; see sdk/ecarx-policy/README.zh-CN.md for the target's server limitation. */
 internal object EcarxMicPolicy {
     private const val TAG = "DiPlay-Ecarx-Mic"
-
-    const val REQUEST_TYPE_SYSTEM = 1
+    private const val READY_TIMEOUT_MS = 1_500L
     const val REQUEST_TYPE_CALL = 2
-    const val REQUEST_TYPE_RECORD = 3
 
     interface Listener {
         fun onResume()
-        fun onAbort(reason: Int)
+        fun onAbort(requestType: Int)
+        fun onFallback(reason: String)
+        fun onDiagnostic(line: String)
     }
 
-    data class Result(val ok: Boolean, val reason: String) {
-        companion object {
-            fun ok(what: String) = Result(true, what)
-            fun failed(what: String) = Result(false, what)
-        }
-    }
-
-    /** The release closure retains the exact callback accepted by the platform. */
-    class Held internal constructor(private val releaseMic: () -> Boolean) {
-        val granted = true
-
-        fun release(): Result = runCatching { releaseMic() }.fold(
-            { released -> if (released) Result.ok("releaseMic") else Result.failed("releaseMic declined") },
-            { Result.failed("releaseMic threw $it") },
-        )
-    }
+    private val main by lazy { Handler(Looper.getMainLooper()) }
+    // The SDK retains init callbacks for the process lifetime. Register one without retaining a sink.
+    private var policyApi: Any? = null
+    private var ready: Boolean? = null
+    private val requests = mutableSetOf<Held>() // main thread only
 
     fun describe(): String = buildString {
         append("policyApi=").append(EcarxCapabilities.classPresent(EcarxCapabilities.POLICY_API))
@@ -47,48 +32,126 @@ internal object EcarxMicPolicy {
         append(" micCallback=").append(EcarxCapabilities.classPresent(EcarxCapabilities.MIC_CALLBACK))
     }
 
-    /** A usable policy handle means arbitration can be attempted; refusal never blocks recording. */
-    fun available(context: Context): Boolean {
-        return audioPolicy(context) != null
-    }
-
-    /** Requests a grant before capture; callers release an accepted request when capture stops. */
+    /** Returns a cancellable request, not a grant. Only onResume authorizes capture. */
     fun requestMic(context: Context, requestType: Int, listener: Listener): Held? {
-        val policy = audioPolicy(context) ?: return null
-        return runCatching {
-            val type = Class.forName(EcarxCapabilities.AUDIO_POLICY)
-            val callbackType = Class.forName(EcarxCapabilities.MIC_CALLBACK)
-            val callback = Proxy.newProxyInstance(callbackType.classLoader, arrayOf(callbackType), MicCallbackHandler(listener))
-            if (type.getMethod("requestMic", Int::class.javaPrimitiveType, callbackType)
-                    .invoke(policy, requestType, callback) != true) {
-                Log.i(TAG, "requestMic declined requestType=$requestType")
-                return null
+        val app = context.applicationContext
+        val type = runCatching { Class.forName(EcarxCapabilities.POLICY_API) }.getOrNull() ?: return null
+        val api = runCatching { type.getMethod("get", Context::class.java).invoke(null, app) }
+            .onFailure { Log.i(TAG, "PolicyAPI unavailable: $it") }.getOrNull() ?: return null
+        return Held(requestType, listener).also { held ->
+            main.post {
+                if (held.closed.get()) return@post
+                requests.add(held)
+                main.postDelayed(held.timeout, READY_TIMEOUT_MS)
+                held.report("initializing")
+                if (policyApi == null) {
+                    runCatching {
+                        policyApi = api
+                        val callback = callback(EcarxCapabilities.POLICY_CALLBACK) { name, args ->
+                            if (name == "onAPIReady") {
+                                ready = args!![0] as Boolean
+                                requests.toList().forEach { it.onReady(ready == true) }
+                            }
+                        }
+                        type.getMethod("init", Context::class.java, callback.javaClass.interfaces.single())
+                            .invoke(policyApi, app, callback)
+                    }.onFailure {
+                        policyApi = null
+                        ready = null
+                        requests.toList().forEach { request -> request.fallback("init failed: $it") }
+                    }
+                } else ready?.let(held::onReady)
             }
-            // Preserve grant-on-accept: the reference app starts recording before a later onResume.
-            Held { type.getMethod("releaseMic", callbackType).invoke(policy, callback) == true }
-        }.getOrElse {
-            Log.i(TAG, "requestMic failed: $it")
-            null
         }
     }
 
-    private fun audioPolicy(context: Context): Any? = runCatching {
-        val type = Class.forName(EcarxCapabilities.POLICY_API)
-        val policy = type.getMethod("get", Context::class.java).invoke(null, context) ?: return null
-        type.getMethod("getAudioPolicy").invoke(policy)
-    }.getOrElse {
-        Log.i(TAG, "PolicyAPI unavailable: $it")
-        null
+    class Held internal constructor(private val requestType: Int, private var listener: Listener?) {
+        internal val closed = AtomicBoolean(false)
+        internal val timeout = Runnable { fallback("API/grant timeout") }
+        private var releaseMic: (() -> Boolean)? = null
+
+        internal fun report(message: String) {
+            Log.i(TAG, message)
+            runCatching { listener?.onDiagnostic("Audio: ECARX mic $message") }
+        }
+
+        internal fun onReady(isReady: Boolean) {
+            if (closed.get()) return
+            report("onAPIReady ready=$isReady")
+            if (!isReady) {
+                fallback("API not ready")
+                return
+            }
+            if (releaseMic != null) return
+            runCatching {
+                // initPolicy() replaces the audio wrapper; never cache getAudioPolicy() before readiness.
+                val api = policyApi ?: error("Policy API unavailable")
+                val audio = Class.forName(EcarxCapabilities.POLICY_API).getMethod("getAudioPolicy").invoke(api)
+                    ?: error("Audio policy unavailable")
+                val type = Class.forName(EcarxCapabilities.AUDIO_POLICY)
+                val callback = callback(EcarxCapabilities.MIC_CALLBACK) { name, args ->
+                    if (!closed.get() && releaseMic != null) {
+                        when (name) {
+                            "onResume" -> {
+                                main.removeCallbacks(timeout)
+                                report("onResume requestType=CALL(2) granted=true")
+                                listener?.onResume()
+                            }
+                            "onAbort" -> {
+                                main.removeCallbacks(timeout)
+                                val abortedType = args!![0] as Int
+                                report("onAbort requestType=$abortedType granted=false")
+                                listener?.onAbort(abortedType)
+                            }
+                        }
+                    }
+                }
+                val callbackType = callback.javaClass.interfaces.single()
+                val accepted = type.getMethod("requestMic", Int::class.javaPrimitiveType, callbackType)
+                    .invoke(audio, requestType, callback) == true
+                report("request requestType=CALL(2) accepted=$accepted granted=${if (accepted) "unknown" else "false"}")
+                if (accepted) {
+                    releaseMic = { type.getMethod("releaseMic", callbackType).invoke(audio, callback) == true }
+                } else fallback("request declined or unsupported")
+            }.onFailure { fallback("request failed: $it") }
+        }
+
+        internal fun fallback(reason: String) {
+            if (closed.compareAndSet(false, true)) finish(reason)
+        }
+
+        /** Cancel immediately, including queued grants; vendor cleanup runs on its callback thread. */
+        fun release() {
+            if (closed.compareAndSet(false, true)) main.post { finish(null) }
+        }
+
+        private fun finish(fallbackReason: String?) {
+            main.removeCallbacks(timeout)
+            requests.remove(this)
+            val release = releaseMic
+            releaseMic = null
+            val result = runCatching { release?.invoke() ?: true }
+            report("released held=${release != null} ok=${result.getOrDefault(false)}${result.exceptionOrNull()?.let { " error=$it" } ?: ""}")
+            val target = listener
+            listener = null
+            if (fallbackReason != null) {
+                Log.i(TAG, "recording directly: $fallbackReason")
+                runCatching { target?.onDiagnostic("Audio: ECARX mic fallback reason=$fallbackReason") }
+                target?.onFallback(fallbackReason)
+            }
+        }
     }
 
-    private class MicCallbackHandler(private val listener: Listener) : InvocationHandler {
-        override fun invoke(proxy: Any, method: Method, args: Array<out Any?>?): Any? = when (method.name) {
-            "onResume" -> { listener.onResume(); null }
-            "onAbort" -> { listener.onAbort((args?.firstOrNull() as? Int) ?: -1); null }
-            "toString" -> "EcarxMicCallback"
-            "hashCode" -> System.identityHashCode(proxy)
-            "equals" -> proxy === args?.firstOrNull()
-            else -> null
+    /** Both SDK callback interfaces are void; marshal Binder callbacks before touching request state. */
+    private fun callback(name: String, onCall: (String, Array<out Any?>?) -> Unit): Any {
+        val type = Class.forName(name)
+        return Proxy.newProxyInstance(type.classLoader, arrayOf(type)) { proxy, method, args ->
+            when (method.name) {
+                "toString" -> "DiPlayPolicyCallback($name)"
+                "hashCode" -> System.identityHashCode(proxy)
+                "equals" -> proxy === args?.firstOrNull()
+                else -> { main.post { onCall(method.name, args) }; null }
+            }
         }
     }
 }

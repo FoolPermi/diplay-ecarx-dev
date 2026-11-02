@@ -38,6 +38,7 @@ object EcarxCapabilities {
     // The target's GKUI policy and the newer EAS policy have separate callback/interface types.
     // Probe only the GKUI contract recovered from this firmware's runtime library.
     const val POLICY_API = "com.ecarx.sdk.policy.PolicyAPI"
+    const val POLICY_CALLBACK = "com.ecarx.sdk.openapi.ECarXApiClient\$Callback"
     const val AUDIO_POLICY = "com.ecarx.sdk.policy.IAudioPolicy"
     const val MIC_CALLBACK = "com.ecarx.sdk.policy.IMicResourceCallback"
 

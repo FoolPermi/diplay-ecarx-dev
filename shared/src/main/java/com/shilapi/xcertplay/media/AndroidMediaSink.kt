@@ -289,12 +289,13 @@ class AndroidMediaSink(
     }
     private val microphoneUplinks = ConcurrentHashMap<AudioStreamId, MicrophoneUplink>()
     private val audioModeLock = Any()
-    private var communicationModeStream: AudioStreamId? = null
+    private var communicationModeStream: AudioStreamId? = null // includes a request waiting for its grant
+    private var communicationModeActive = false // guarded by audioModeLock
     private var callSpeaker: CallSpeaker? = null // guarded by audioModeLock
     private var earpieceFallbackTried = false // guarded by audioModeLock
-    // The held ECARX mic resource request for the active telephony stream; released when the mode
-    // restores. Guarded by [audioModeLock].
+    // Retain a revoked request for onResume; only stream teardown releases it. Guarded by audioModeLock.
     private var micHeld: com.shilapi.xcertplay.hud.EcarxMicPolicy.Held? = null
+    private var microphoneClosed = false // guarded by audioModeLock
     private val pendingVideoCodec = ConcurrentHashMap<Int, VideoCodec>()
     private val videoRecoveryHandlers = ConcurrentHashMap<Int, () -> Unit>()
     private val videoDiagnosticHandlers = ConcurrentHashMap<Int, (String) -> Unit>()
@@ -570,11 +571,20 @@ class AndroidMediaSink(
 
     override fun onMicrophoneStarted(id: AudioStreamId, config: MicrophoneConfig) {
         // This callback runs on the downlink thread; microphone failures must not stop playback.
-        try {
+        synchronized(audioModeLock) {
+            if (microphoneClosed) return
             reportMicrophoneState(id, "before-start")
-            if (config.audioType == "telephony") {
-                enterCommunicationMode(id)
+            if (config.audioType == "telephony" && audioManager != null) {
+                if (communicationModeStream == null) communicationModeStream = id
+                if (communicationModeStream == id && requestMicArbitration(id, config)) return
             }
+            startMicrophoneCapture(id, config)
+        }
+    }
+
+    private fun startMicrophoneCapture(id: AudioStreamId, config: MicrophoneConfig) {
+        try {
+            if (config.audioType == "telephony") enterCommunicationMode(id)
             val uplink = microphoneUplinks.computeIfAbsent(id) {
                 MicrophoneUplink(config, onAudioDiagnostic,
                     speakerphoneCall = false,
@@ -594,11 +604,13 @@ class AndroidMediaSink(
     }
 
     override fun onMicrophoneStopped(id: AudioStreamId) {
-        try {
-            microphoneUplinks.remove(id)?.close()
-        } finally {
-            restoreAudioMode(id)
-            reportMicrophoneState(id, "stopped")
+        synchronized(audioModeLock) {
+            try {
+                microphoneUplinks.remove(id)?.close()
+            } finally {
+                restoreAudioMode(id)
+                reportMicrophoneState(id, "stopped")
+            }
         }
     }
 
@@ -615,15 +627,15 @@ class AndroidMediaSink(
     private fun enterCommunicationMode(id: AudioStreamId) {
         val manager = audioManager ?: return
         synchronized(audioModeLock) {
-            if (communicationModeStream != null) return
+            if (communicationModeActive || (communicationModeStream != null && communicationModeStream != id)) return
             // Select the HAL communication path before AudioRecord is created.
             val before = manager.mode
             manager.mode = AudioManager.MODE_IN_COMMUNICATION
             // 820A (HiCar) routes the mic through vendor parameters, and its factory assistant or
             // navigation may already hold the mic resource; ask for both before AudioRecord exists.
             apply820MicParameters(manager, enabled = true)
-            requestMicArbitration(id)
             communicationModeStream = id
+            communicationModeActive = true
             earpieceFallbackTried = false
             val speakerRequested = runCatching(callSpeakerphone).getOrDefault(false)
             if (speakerRequested) callSpeaker = CallSpeaker.on(manager)
@@ -656,48 +668,48 @@ class AndroidMediaSink(
         runCatching { onAudioDiagnostic(line) }
     }
 
-    /** Asks ECARX for the mic before recording; never throws and never blocks recording. */
-    private fun requestMicArbitration(id: AudioStreamId) {
-        val context = appContext ?: return
+    /** A pending request defers capture without blocking the downlink thread. */
+    private fun requestMicArbitration(id: AudioStreamId, config: MicrophoneConfig): Boolean {
+        if (micHeld != null) return true
+        val context = appContext ?: return false
         val policy = com.shilapi.xcertplay.hud.EcarxMicPolicy
-        val needed = policy.available(context)
-        runCatching {
-            onAudioDiagnostic("Audio: ECARX mic policy stream=$id policyAvailable=$needed" +
-                " requestType=CALL(2) ${policy.describe()}")
-        }
-        if (!needed) return
         micHeld = policy.requestMic(context, policy.REQUEST_TYPE_CALL, object :
             com.shilapi.xcertplay.hud.EcarxMicPolicy.Listener {
             override fun onResume() {
-                runCatching {
-                    onAudioDiagnostic("Audio: ECARX mic onResume stream=$id requestType=CALL(2) granted=true")
+                synchronized(audioModeLock) {
+                    if (!microphoneClosed && communicationModeStream == id) startMicrophoneCapture(id, config)
                 }
             }
-            override fun onAbort(reason: Int) {
-                Log.i("xcertplay-usb", "ECARX mic request aborted reason=$reason; recording directly")
-                runCatching {
-                    onAudioDiagnostic("Audio: ECARX mic onAbort stream=$id requestType=CALL(2)" +
-                        " granted=false reason=$reason; recording directly")
+            override fun onAbort(requestType: Int) {
+                synchronized(audioModeLock) {
+                    if (communicationModeStream == id) {
+                        try {
+                            microphoneUplinks.remove(id)?.close()
+                        } finally {
+                            restoreCommunicationMode(id)
+                        }
+                    }
                 }
+            }
+            override fun onFallback(reason: String) { onResume() }
+            override fun onDiagnostic(line: String) {
+                runCatching { onAudioDiagnostic("$line stream=$id") }
             }
         })
-        Log.i("xcertplay-usb", "ECARX mic arbitration stream=$id held=${micHeld?.granted == true}")
         runCatching {
-            onAudioDiagnostic("Audio: ECARX mic request stream=$id requestType=CALL(2)" +
-                " accepted=${micHeld != null} granted=${if (micHeld == null) "false" else "unknown"}" +
-                " basis=request-return; grant reported by callbacks")
+            onAudioDiagnostic("Audio: ECARX mic policy stream=$id policyAvailable=${micHeld != null}" +
+                " requestType=CALL(2) ${policy.describe()}")
         }
+        return micHeld != null
     }
 
     /** Hands the ECARX mic resource back when its communication capture ends. */
     private fun releaseMicArbitration(id: AudioStreamId) {
         val held = micHeld
         micHeld = null
-        val result = held?.release()
-        Log.i("xcertplay-usb", "ECARX mic released: ${result?.reason ?: "not held"}")
-        runCatching {
-            onAudioDiagnostic("Audio: ECARX mic released held=${held != null}" +
-                " ok=${result?.ok ?: true} stream=$id")
+        held?.release()
+        if (held == null) runCatching {
+            onAudioDiagnostic("Audio: ECARX mic released held=false ok=true stream=$id")
         }
     }
 
@@ -724,37 +736,42 @@ class AndroidMediaSink(
     }
 
     private fun restoreAudioMode(id: AudioStreamId?) {
-        val manager = audioManager ?: return
         synchronized(audioModeLock) {
             val active = communicationModeStream ?: return
             if (id != null && id != active) return
             communicationModeStream = null
-            callSpeaker?.restore()
-            callSpeaker = null
-            // The report is built inside the try but sent outside it: reporting from in there
-            // would let a failing callback be caught as a failed restore.
-            val line = try {
-                // AudioService keeps one mode request per process and uses the newest. Setting back the mode found
-                // at the start would keep DiPlay asking for it after the process that set it, such as the Telecom
-                // call for the car's phone audio, lets go, and the head unit stays in the voice path (#987).
-                // MODE_NORMAL withdraws DiPlay's request: the mode returns to another process's, or to normal.
-                manager.mode = AudioManager.MODE_NORMAL
-                Log.i("xcertplay-usb", "audio mode restored to ${manager.mode}")
-                "Audio: mode restored requested=${AudioManager.MODE_NORMAL} now=${manager.mode} stream=$active"
-            } catch (error: RuntimeException) {
-                Log.w("xcertplay-usb", "could not restore audio mode", error)
-                val currentMode = runCatching { manager.mode.toString() }.getOrDefault("unknown")
-                "Audio: mode restore failed requested=${AudioManager.MODE_NORMAL} now=$currentMode" +
-                    " error=${error.javaClass.simpleName}"
+            try {
+                restoreCommunicationMode(active)
+            } finally {
+                releaseMicArbitration(active)
             }
-            // Even a rejected mode restore must return the vendor mic resource.
-            apply820MicParameters(manager, enabled = false)
-            releaseMicArbitration(active)
-            runCatching { onAudioDiagnostic(line) }
         }
     }
 
+    /** Called under audioModeLock; a revoked grant keeps its request but returns the HAL route. */
+    private fun restoreCommunicationMode(id: AudioStreamId) {
+        if (!communicationModeActive) return
+        communicationModeActive = false
+        val manager = audioManager ?: return
+        callSpeaker?.restore()
+        callSpeaker = null
+        val line = try {
+            // MODE_NORMAL withdraws our request instead of retaining another process's old mode (#987).
+            manager.mode = AudioManager.MODE_NORMAL
+            Log.i("xcertplay-usb", "audio mode restored to ${manager.mode}")
+            "Audio: mode restored requested=${AudioManager.MODE_NORMAL} now=${manager.mode} stream=$id"
+        } catch (error: RuntimeException) {
+            Log.w("xcertplay-usb", "could not restore audio mode", error)
+            val currentMode = runCatching { manager.mode.toString() }.getOrDefault("unknown")
+            "Audio: mode restore failed requested=${AudioManager.MODE_NORMAL} now=$currentMode" +
+                " error=${error.javaClass.simpleName}"
+        }
+        apply820MicParameters(manager, enabled = false)
+        runCatching { onAudioDiagnostic(line) }
+    }
+
     fun close() {
+        synchronized(audioModeLock) { microphoneClosed = true }
         synchronized(videoOwnershipLock) {
             videoClosed = true
             videoDecoders.entries.toList().forEach { (type, decoder) -> retire(type, decoder) }
@@ -780,11 +797,13 @@ class AndroidMediaSink(
         callEchoReferences.clear()
         val hadMedia = synchronized(mediaAudioTypes) { mediaAudioTypes.isNotEmpty().also { mediaAudioTypes.clear() } }
         if (hadMedia) onMediaAudioChanged(false)
-        try {
-            microphoneUplinks.values.forEach(MicrophoneUplink::close)
-        } finally {
-            microphoneUplinks.clear()
-            restoreAudioMode(null)
+        synchronized(audioModeLock) {
+            try {
+                microphoneUplinks.values.forEach(MicrophoneUplink::close)
+            } finally {
+                microphoneUplinks.clear()
+                restoreAudioMode(null)
+            }
         }
     }
 

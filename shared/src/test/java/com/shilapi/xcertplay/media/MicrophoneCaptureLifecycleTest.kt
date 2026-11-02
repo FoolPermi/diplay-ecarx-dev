@@ -4,13 +4,16 @@ import android.Manifest
 import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.os.Looper
 import com.ecarx.sdk.policy.PolicyAPI
+import com.shilapi.xcertplay.hud.EcarxMicPolicy
 import com.shilapi.xcertplay.airplay.AudioStreamId
 import com.shilapi.xcertplay.airplay.MicrophoneConfig
 import java.net.InetAddress
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.time.Duration
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
@@ -24,6 +27,7 @@ import org.robolectric.annotation.Implementation
 import org.robolectric.annotation.Implements
 import org.robolectric.shadows.ShadowAudioEffect
 import org.robolectric.shadows.ShadowAudioRecord
+import org.robolectric.util.ReflectionHelpers
 
 /** Siri keeps direct capture; calls acquire and release the communication path. */
 @RunWith(RobolectricTestRunner::class)
@@ -44,6 +48,8 @@ class MicrophoneCaptureLifecycleTest {
 
     @Before fun setUp() {
         policy.reset()
+        ReflectionHelpers.setStaticField(EcarxMicPolicy::class.java, "policyApi", null)
+        ReflectionHelpers.setStaticField(EcarxMicPolicy::class.java, "ready", null)
         PolicyAPI.enabled = true
         CaptureAudioManager.rejectMode = null
         CaptureAudioManager.rejectParameter = null
@@ -70,6 +76,7 @@ class MicrophoneCaptureLifecycleTest {
     @After fun tearDown() {
         CaptureAudioManager.rejectMode = null
         sink?.close()
+        shadowOf(Looper.getMainLooper()).idle()
         ShadowAudioRecord.clearSource()
         policy.reset()
     }
@@ -89,8 +96,10 @@ class MicrophoneCaptureLifecycleTest {
         assertEquals(AudioManager.MODE_IN_COMMUNICATION, manager.mode)
         assertEquals(2, policy.requestType)
         assertEquals(1, policy.requests)
-        assertEquals(listOf("mode:3", "parameter:hicar_enable=true", "parameter:AudioControlMode=01121001",
-            "parameter:ASR_AEC=ON", "requestMic", "recorder"), policy.events.toList())
+        assertEquals(listOf("init", "getAudioPolicy", "requestMic", "mode:3", "parameter:hicar_enable=true",
+            "parameter:AudioControlMode=01121001", "parameter:ASR_AEC=ON", "recorder"), policy.events.toList())
+        assertEquals(1, PolicyAPI.initCalls)
+        assertEquals(1, PolicyAPI.audioLookups)
         assertEquals(listOf(MediaRecorder.AudioSource.VOICE_COMMUNICATION), MicrophoneSourceFallbackTest.RecorderBuilder.attempts)
         assertTrue(ShadowAudioEffect.getAudioEffects().isEmpty())
         assertTrue(reports.any { it.contains("phase=before-start mode=1") })
@@ -98,7 +107,7 @@ class MicrophoneCaptureLifecycleTest {
         assertTrue(reports.any { it.contains("policyAvailable=true requestType=CALL(2)") })
         assertTrue(reports.any { it.contains("onResume") && it.contains("granted=true") })
 
-        sink!!.onMicrophoneStopped(call)
+        stop()
         assertEquals(AudioManager.MODE_RINGTONE, manager.mode)
         assertEquals(1, policy.releases)
         assertNull(policy.held)
@@ -122,21 +131,24 @@ class MicrophoneCaptureLifecycleTest {
         assertTrue(reports.any { it.contains("stage=RECORDER_CREATION") })
     }
 
-    @Test fun deniedAndAbortedRequestsStillStartDirectCapture() {
+    @Test fun declinedRequestsFallBackButAbortedGrantsWaitForResume() {
         policy.reject = true
         start()
         assertTrue(reports.any { it.startsWith("Microphone: start") })
         assertTrue(reports.any { it.contains("accepted=false granted=false") })
-        sink!!.onMicrophoneStopped(call)
+        stop()
         assertEquals(0, policy.releases)
         sink!!.close()
 
         policy.reject = false
         policy.abort = true
         start()
-        assertTrue(reports.any { it.contains("onAbort") && it.contains("granted=false reason=7") })
+        assertTrue(reports.any { it.contains("onAbort requestType=2 granted=false") })
+        assertEquals(AudioRecord.RECORDSTATE_STOPPED, MicrophoneSourceFallbackTest.RecorderBuilder.built.last().recordingState)
+        policy.held!!.onResume()
+        shadowOf(Looper.getMainLooper()).idle()
         assertEquals(AudioRecord.RECORDSTATE_RECORDING, MicrophoneSourceFallbackTest.RecorderBuilder.built.last().recordingState)
-        sink!!.onMicrophoneStopped(call)
+        stop()
         assertEquals(1, policy.releases)
     }
 
@@ -145,7 +157,7 @@ class MicrophoneCaptureLifecycleTest {
         start()
         assertEquals(0, policy.requests)
         assertTrue(reports.any { it.startsWith("Microphone: start") })
-        sink!!.onMicrophoneStopped(call)
+        stop()
         assertEquals(AudioManager.MODE_RINGTONE, manager.mode)
         assertTrue(reports.any { it.contains("mic released held=false ok=true") })
     }
@@ -155,7 +167,7 @@ class MicrophoneCaptureLifecycleTest {
         start()
         assertTrue(reports.any { it.contains("ASR_AEC=ON failed=SecurityException") })
         assertTrue(reports.any { it.startsWith("Microphone: start") })
-        sink!!.onMicrophoneStopped(call)
+        stop()
         assertEquals(1, policy.releases)
         assertEquals(AudioManager.MODE_RINGTONE, manager.mode)
     }
@@ -163,7 +175,7 @@ class MicrophoneCaptureLifecycleTest {
     @Test fun failedModeRestoreStillClosesVendorParametersAndReleasesTheMic() {
         start()
         CaptureAudioManager.rejectMode = AudioManager.MODE_NORMAL
-        sink!!.onMicrophoneStopped(call)
+        stop()
         assertEquals(1, policy.releases)
         assertTrue(policy.events.contains("parameter:ASR_AEC=OFF"))
         assertTrue(reports.any { it.contains("mode restore failed") })
@@ -173,7 +185,7 @@ class MicrophoneCaptureLifecycleTest {
     @Test fun declinedReleaseIsNotReportedAsSuccessful() {
         policy.declineRelease = true
         start()
-        sink!!.onMicrophoneStopped(call)
+        stop()
         assertTrue(reports.any { it.contains("mic released held=true ok=false") })
     }
 
@@ -181,23 +193,27 @@ class MicrophoneCaptureLifecycleTest {
         sink = AndroidMediaSink(context = context, onAudioDiagnostic = reports::add)
         repeat(10) {
             sink!!.onMicrophoneStarted(call, config(call))
+            shadowOf(Looper.getMainLooper()).idle()
             sink!!.onMicrophoneStopped(AudioStreamId(999, "other"))
             assertEquals(AudioManager.MODE_IN_COMMUNICATION, manager.mode)
             assertEquals(it, policy.releases)
-            sink!!.onMicrophoneStopped(call)
+            stop()
             assertEquals(AudioManager.MODE_RINGTONE, manager.mode)
             assertEquals(it + 1, policy.releases)
             assertNull(policy.held)
         }
         assertEquals(10, policy.requests)
+        assertEquals(1, PolicyAPI.initCalls)
     }
 
     @Test fun sinkCloseReleasesAnActiveCaptureEvenWhenDiagnosticsThrow() {
         sink = AndroidMediaSink(context = context,
             onAudioDiagnostic = { throw IllegalStateException("diagnostic consumer failed") })
         sink!!.onMicrophoneStarted(call, config(call))
+        shadowOf(Looper.getMainLooper()).idle()
         assertEquals(AudioManager.MODE_IN_COMMUNICATION, manager.mode)
         sink!!.close()
+        shadowOf(Looper.getMainLooper()).idle()
         assertEquals(AudioManager.MODE_RINGTONE, manager.mode)
         assertEquals(1, policy.releases)
     }
@@ -211,6 +227,130 @@ class MicrophoneCaptureLifecycleTest {
     private fun start(id: AudioStreamId = call) {
         sink = AndroidMediaSink(context = context, onAudioDiagnostic = reports::add)
         sink!!.onMicrophoneStarted(id, config(id))
+        shadowOf(Looper.getMainLooper()).idle()
+    }
+
+    private fun stop() {
+        sink!!.onMicrophoneStopped(call)
+        shadowOf(Looper.getMainLooper()).idle()
+    }
+
+    @Test fun nonNullPolicyWaitsForInitializationAndAnActualGrant() {
+        PolicyAPI.autoReady = false
+        policy.deferGrant = true
+        start()
+        assertEquals(1, PolicyAPI.initCalls)
+        assertEquals(0, PolicyAPI.audioLookups)
+        assertEquals(0, policy.requests)
+        assertEquals(AudioManager.MODE_RINGTONE, manager.mode)
+        assertTrue(policy.events.none { it.startsWith("parameter:") })
+        assertTrue(MicrophoneSourceFallbackTest.RecorderBuilder.built.isEmpty())
+        PolicyAPI.deliverReady(true)
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(1, policy.requests)
+        assertTrue(MicrophoneSourceFallbackTest.RecorderBuilder.built.isEmpty())
+        policy.held!!.onResume()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertTrue(captureStarted.await(5, TimeUnit.SECONDS))
+        stop()
+        assertEquals(1, policy.releases)
+    }
+
+    @Test fun revokedGrantStopsCaptureAndResumeRestartsIt() {
+        start()
+        val callback = checkNotNull(policy.held)
+        val recorder = MicrophoneSourceFallbackTest.RecorderBuilder.built.last()
+        callback.onAbort(2)
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(AudioRecord.RECORDSTATE_STOPPED, recorder.recordingState)
+        assertEquals(AudioManager.MODE_RINGTONE, manager.mode)
+        assertTrue(policy.events.contains("parameter:hicar_enable=false"))
+        assertEquals(0, policy.releases)
+        callback.onResume()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(AudioRecord.RECORDSTATE_RECORDING, MicrophoneSourceFallbackTest.RecorderBuilder.built.last().recordingState)
+        assertEquals(AudioManager.MODE_IN_COMMUNICATION, manager.mode)
+        stop()
+        assertEquals(1, policy.releases)
+    }
+
+    @Test fun stopBeforeApiReadinessDoesNotRequestOrStartCapture() {
+        PolicyAPI.autoReady = false
+        start()
+        stop()
+        PolicyAPI.deliverReady(true)
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(0, policy.requests)
+        assertTrue(MicrophoneSourceFallbackTest.RecorderBuilder.built.isEmpty())
+        assertEquals(AudioManager.MODE_RINGTONE, manager.mode)
+    }
+
+    @Test fun lateGrantAfterCloseCannotResurrectCaptureOrReleaseTwice() {
+        policy.deferGrant = true
+        start()
+        val callback = checkNotNull(policy.held)
+        sink!!.close()
+        callback.onResume()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertTrue(MicrophoneSourceFallbackTest.RecorderBuilder.built.isEmpty())
+        assertEquals(1, policy.releases)
+        assertEquals(AudioManager.MODE_RINGTONE, manager.mode)
+        sink!!.close()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(1, policy.releases)
+    }
+
+    @Test fun unsupportedTargetServerKeepsDirectCaptureAfterReady() {
+        policy.unsupported = true
+        start()
+        assertEquals(1, policy.requests)
+        assertNull(policy.held)
+        assertTrue(captureStarted.await(5, TimeUnit.SECONDS))
+        assertTrue(reports.any { it.contains("fallback reason=request declined or unsupported") })
+        stop()
+        assertEquals(0, policy.releases)
+    }
+
+    @Test fun initializationTimeoutFallsBackAndLateReadinessDoesNotAcquireMic() {
+        PolicyAPI.autoReady = false
+        start()
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(1_500))
+        assertTrue(captureStarted.await(5, TimeUnit.SECONDS))
+        PolicyAPI.deliverReady(true)
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(0, policy.requests)
+        assertTrue(reports.any { it.contains("fallback reason=API/grant timeout") })
+        stop()
+    }
+
+    @Test fun grantTimeoutReleasesAcceptedRequestBeforeDirectCapture() {
+        policy.deferGrant = true
+        start()
+        val callback = checkNotNull(policy.held)
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(1_500))
+        assertTrue(captureStarted.await(5, TimeUnit.SECONDS))
+        assertEquals(1, policy.releases)
+        assertTrue(policy.events.indexOf("releaseMic") < policy.events.indexOf("recorder"))
+        callback.onResume()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(1, MicrophoneSourceFallbackTest.RecorderBuilder.built.size)
+        stop()
+        assertEquals(1, policy.releases)
+    }
+
+    @Test fun initFailureOrNotReadyFallsBackWithoutFetchingAnAudioHandle() {
+        PolicyAPI.failInit = true
+        start()
+        assertTrue(captureStarted.await(5, TimeUnit.SECONDS))
+        assertEquals(0, PolicyAPI.audioLookups)
+        stop()
+        sink!!.close()
+        PolicyAPI.failInit = false
+        PolicyAPI.readyResult = false
+        start()
+        assertEquals(0, PolicyAPI.audioLookups)
+        assertEquals(AudioRecord.RECORDSTATE_RECORDING, MicrophoneSourceFallbackTest.RecorderBuilder.built.last().recordingState)
+        stop()
     }
 
     private fun config(id: AudioStreamId) = MicrophoneConfig(audioType = id.audioType,
