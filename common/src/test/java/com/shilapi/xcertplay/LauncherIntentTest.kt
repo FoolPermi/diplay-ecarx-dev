@@ -65,7 +65,7 @@ class LauncherIntentTest {
         ReflectionHelpers.setStaticField(Class.forName("com.shilapi.xcertplay.hud.EcarxHudBridge"), "context", null)
         controller = Robolectric.buildActivity(DiPlayActivity::class.java,
             Intent().putExtra("page", "settings")).create()
-        assertFalse(prefs.getBoolean("dim_presentation_switch", true))
+        assertFalse(prefs.contains("dim_presentation_switch"))
         // No vendor DIM implementation here: retain the release record until an interface is ready.
         assertTrue(prefs.getBoolean("dim_presentation_release_pending", false))
         assertFalse(CarPlayBackgroundSession.hasSession())
@@ -83,7 +83,7 @@ class LauncherIntentTest {
         val host = Robolectric.buildActivity(CarPlayHostActivity::class.java,
             Intent(android.hardware.usb.UsbManager.ACTION_USB_DEVICE_ATTACHED)).create()
         try {
-            assertFalse(prefs.getBoolean("dim_presentation_switch", true))
+            assertFalse(prefs.contains("dim_presentation_switch"))
             assertTrue(prefs.getBoolean("dim_presentation_release_pending", false))
         } finally {
             host.destroy()

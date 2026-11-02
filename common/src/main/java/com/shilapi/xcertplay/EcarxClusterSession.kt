@@ -7,10 +7,12 @@ import android.os.Looper
 import android.util.Log
 import android.view.Surface
 import com.shilapi.xcertplay.hud.NavigationOutputs
+import com.shilapi.xcertplay.hud.EcarxOutputSettings
+import com.shilapi.xcertplay.airplay.AirPlaySession
 import com.shilapi.xcertplay.media.AndroidMediaSink
 import com.shilapi.xcertplay.orchestration.CarPlayController
 
-/** The route's independent stream111 window belongs to the retained session, never to its Activity. */
+/** The cluster window and its selected video source belong to the retained session, never an Activity. */
 internal class EcarxClusterSession(
     context: Context,
     private val controller: CarPlayController,
@@ -22,6 +24,8 @@ internal class EcarxClusterSession(
     private val displays = app.getSystemService(DisplayManager::class.java)
     private var presentation: EcarxClusterPresentation? = null
     private var surface: Surface? = null
+    private var outputSession: AirPlaySession? = null
+    private var mirrorMain = false
     @Volatile private var wanted = false
     @Volatile private var closed = false
     private val stateListener: () -> Unit = ::onSessionChanged
@@ -55,19 +59,25 @@ internal class EcarxClusterSession(
 
     fun diagnostics(): String =
         "sessionActive=${controller.activeAirPlaySession() != null} panelWanted=$wanted " +
-            "presentationShowing=${presentation?.isShowing == true} clusterSurfaceValid=${surface?.isValid == true}"
+            "presentationShowing=${presentation?.isShowing == true} clusterSurfaceValid=${surface?.isValid == true} " +
+            "source=${if (mirrorMain) "main-mirror" else "independent-map"}"
 
     private fun apply() {
         if (closed) return
         val session = controller.activeAirPlaySession()
+        if (session !== outputSession) {
+            hide()
+            outputSession = session
+            mirrorMain = EcarxOutputSettings.mirrorMainScreen(app)
+        }
         if (!wanted || session?.hasRenderedMainFrame != true) {
             hide()
             return
         }
         surface?.takeIf { it.isValid }?.let {
-            sink.setSurface(111, it)
+            if (mirrorMain) sink.setMirrorSurface(110, MIRROR_KEY, it) else sink.setSurface(111, it)
             val accepted = NavigationOutputs.requestPresentation(app, true, "cluster surface ready")
-            controller.setClusterOutputVisible(accepted)
+            controller.setClusterOutputVisible(accepted && !mirrorMain)
         }
         if (presentation != null) return
         val display = displays?.getDisplay(DISPLAY_ID) ?: return
@@ -75,7 +85,9 @@ internal class EcarxClusterSession(
         panel = EcarxClusterPresentation(app, display) { next ->
             if (presentation === panel) onSurface(next)
         }
-        panel.setVideoSize(WIDTH, HEIGHT)
+        val video = CarPlayBackgroundSession.snapshot()
+        if (mirrorMain && video != null) panel.setVideoSize(video.width, video.height)
+        else panel.setVideoSize(WIDTH, HEIGHT)
         presentation = panel
         panel.setOnDismissListener {
             // An old Dialog's asynchronous dismiss must never clear its replacement.
@@ -96,7 +108,8 @@ internal class EcarxClusterSession(
             return
         }
         log("Cluster panel: window created on \"${display.name}\" " +
-            "${display.mode.physicalWidth}x${display.mode.physicalHeight} awaitingSurface=${surface == null} source=independent map session-owned")
+            "${display.mode.physicalWidth}x${display.mode.physicalHeight} awaitingSurface=${surface == null} " +
+            "source=${if (mirrorMain) "main-mirror" else "independent-map"} session-owned")
     }
 
     private fun hide() {
@@ -111,7 +124,9 @@ internal class EcarxClusterSession(
     private fun onSurface(next: Surface?) {
         val previous = surface
         if (previous === next) return
-        if (previous != null) sink.clearSurface(111, previous)
+        if (previous != null) {
+            if (mirrorMain) sink.setMirrorSurface(110, MIRROR_KEY, null) else sink.clearSurface(111, previous)
+        }
         surface = next
         if (next != null) {
             apply()
@@ -139,6 +154,7 @@ internal class EcarxClusterSession(
     }
 
     companion object {
+        private const val MIRROR_KEY = "ecarx-cluster-main"
         const val DISPLAY_ID = 1
         const val WIDTH = 1920
         const val HEIGHT = 720

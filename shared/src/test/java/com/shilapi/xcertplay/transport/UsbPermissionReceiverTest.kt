@@ -2,6 +2,9 @@ package com.shilapi.xcertplay.transport
 
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageInfo
+import android.content.pm.PackageManager
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import java.util.concurrent.CopyOnWriteArrayList
@@ -36,9 +39,20 @@ class UsbPermissionReceiverTest {
         .putExtra(UsbManager.EXTRA_DEVICE, device)
         .putExtra(UsbManager.EXTRA_PERMISSION_GRANTED, granted)
 
-    private fun deliver(intent: Intent) {
-        context.sendBroadcast(intent)
+    private fun deliver(intent: Intent, sender: Context = context) {
+        sender.sendBroadcast(intent)
         ShadowLooper.idleMainLooper()
+    }
+
+    private fun externalSender(): Context {
+        val name = "test.external.usb.sender"
+        shadowOf(context.packageManager).installPackage(PackageInfo().apply {
+            packageName = name
+            applicationInfo = ApplicationInfo().apply { packageName = name; uid = 10_123 }
+            requestedPermissions = emptyArray()
+        })
+        assertEquals(PackageManager.PERMISSION_DENIED, context.packageManager.checkPermission(senderPermission, name))
+        return context.createPackageContext(name, 0)
     }
 
     private fun registeredPermission(action: String): String? =
@@ -58,8 +72,16 @@ class UsbPermissionReceiverTest {
     @Test fun iphoneResultFromAnotherAppIsNotDelivered() {
         val results = CopyOnWriteArrayList<IphoneUsbHost.PermissionResult>()
         IphoneUsbHost(context, usb, IphoneUsbMatcher.appleVendor()).registerPermissionReceiver { results.add(it) }
-        deliver(result(iphoneAction, device(IphoneUsbMatcher.APPLE_VENDOR_ID, 0x12a8), granted = true))
+        deliver(result(iphoneAction, device(IphoneUsbMatcher.APPLE_VENDOR_ID, 0x12a8), granted = true), externalSender())
         assertTrue("forged result was delivered to the app (${results.size} callbacks)", results.isEmpty())
+    }
+
+    @Test fun ch341ResultFromAnotherAppIsNotDelivered() {
+        val results = CopyOnWriteArrayList<Ch341UsbHost.PermissionResult>()
+        Ch341UsbHost(context, usb, Ch341DeviceMatcher(listOf(UsbDeviceId(0x1A86, 0x5512))))
+            .registerPermissionReceiver { results.add(it) }
+        deliver(result(ch341Action, device(0x1A86, 0x5512), granted = true), externalSender())
+        assertTrue("forged CH341 result was delivered to the app", results.isEmpty())
     }
 
     @Test fun iphoneResultFromThisAppIsDelivered() {

@@ -29,10 +29,7 @@ object NavigationOutputs {
         val app = context.applicationContext
         EcarxHudBridge.recoverFactoryNavigationIfIdle(app)
         if (!EcarxCapabilities.detect(app).identified) return
-        if (EcarxOutputSettings.enabled(app) || EcarxOutputSettings.presentationSwitch(app) ||
-            EcarxOutputSettings.presentationReleasePending(app)) {
-            EcarxHudBridge.initialize(app)
-        }
+        EcarxHudBridge.initialize(app)
     }
 
     fun start(context: Context) {
@@ -48,34 +45,12 @@ object NavigationOutputs {
     }
 
     /**
-     * An instrument-cluster switch changed; applies at once. Restarts the worker so a switch
-     * flipped before the first session still takes effect.
-     *
-     * The DIM bridge is initialized even when the guidance output is off, because the projection
-     * switch is a separate feature and it is the bridge that owns its retry watch.
+     * The session window owns runtime delivery. OEM callbacks own this process's display intent;
+     * acceptance does not prove the instrument panel is displaying it.
      */
-    fun ecarxChanged(context: Context) {
-        val app = context.applicationContext
-        if (!EcarxCapabilities.detect(app).identified) return
-        useEcarx = true
-        EcarxHudBridge.initialize(app)
-        if (EcarxOutputSettings.enabled(app)) {
-            ecarx.start {
-                EcarxHudBridge.initialize(app)
-                EcarxHudBridge.setCurrentSession(currentSession)
-            }
-            ecarx.submit(EcarxHudBridge::settingsChanged)
-        } else ecarx.clear()
-    }
-
-    /**
-     * Shared entry for settings and the host window. The bridge owns the saved request, runtime
-     * intent and retry watch; acceptance does not prove the instrument panel is displaying it.
-     */
-    fun requestPresentation(context: Context, show: Boolean, origin: String = "", fromSettings: Boolean = false): Boolean {
+    fun requestPresentation(context: Context, show: Boolean, origin: String = ""): Boolean {
         EcarxHudBridge.initialize(context)
-        return if (fromSettings) EcarxHudBridge.setVisibilityIntent(show, origin).ok
-        else EcarxHudBridge.applyPresentation(show, origin).ok
+        return EcarxHudBridge.applyPresentation(show, origin).ok
     }
 
     fun diagnosticReport(context: Context): String = EcarxHudBridge.diagnostics(context)

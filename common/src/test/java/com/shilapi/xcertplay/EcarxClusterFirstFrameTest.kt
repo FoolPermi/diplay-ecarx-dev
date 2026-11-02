@@ -55,7 +55,7 @@ class EcarxClusterFirstFrameTest {
         CarPlayBackgroundSession.store(controller, sink, 1920, 1080, Any(), display) {}
         CarPlayBackgroundSession.bindClusterOutput(app, controller) {}
         output = ReflectionHelpers.getField(CarPlayBackgroundSession, "clusterOutput")
-        NavigationOutputs.requestPresentation(app, true, "test display intent", fromSettings = true)
+        NavigationOutputs.onAppOpened(app)
         ReflectionHelpers.setStaticField(Class.forName("com.shilapi.xcertplay.hud.EcarxHudBridge"), "guidanceActive", true)
         idle()
     }
@@ -65,6 +65,7 @@ class EcarxClusterFirstFrameTest {
         idle()
         panels.close()
         ReflectionHelpers.setStaticField(Class.forName("com.shilapi.xcertplay.hud.EcarxHudBridge"), "guidanceActive", false)
+        com.shilapi.xcertplay.hud.EcarxOutputSettings.setMirrorMainScreen(app, false)
     }
 
     @Test fun routeAndSurfaceCannotBypassTheCurrentSessionsFirstMainFrame() {
@@ -213,6 +214,36 @@ class EcarxClusterFirstFrameTest {
         surfaceCallbacks.first()(surface)
         verifyNoInteractions(sink)
         assertSame(replacement, ReflectionHelpers.getField(output, "surface"))
+    }
+
+    @Test fun advancedMirrorUsesMainStreamAndOnlyChangesAtTheNextSession() {
+        com.shilapi.xcertplay.hud.EcarxOutputSettings.setMirrorMainScreen(app, true)
+        val mirrored = mock(AirPlaySession::class.java)
+        `when`(mirrored.hasRenderedMainFrame).thenReturn(true)
+        `when`(controller.activeAirPlaySession()).thenReturn(mirrored)
+        output.onRouteRequested(true)
+        idle()
+        onSurface(surface)
+        verify(sink).setMirrorSurface(110, "ecarx-cluster-main", surface)
+        verify(sink, never()).setSurface(111, surface)
+        verify(panels.constructed().last()).setVideoSize(1920, 1080)
+        verify(controller, never()).setClusterOutputVisible(true)
+
+        com.shilapi.xcertplay.hud.EcarxOutputSettings.setMirrorMainScreen(app, false)
+        clearInvocations(sink)
+        output.onSessionChanged()
+        idle()
+        verify(sink).setMirrorSurface(110, "ecarx-cluster-main", surface)
+        verify(sink, never()).setSurface(111, surface)
+
+        `when`(session.hasRenderedMainFrame).thenReturn(true)
+        `when`(controller.activeAirPlaySession()).thenReturn(session)
+        output.onSessionChanged()
+        idle()
+        verify(sink).setMirrorSurface(110, "ecarx-cluster-main", null)
+        onSurface(surface)
+        verify(sink).setSurface(111, surface)
+        verify(sink, never()).clearSurface(110, surface)
     }
 
     private fun open() {

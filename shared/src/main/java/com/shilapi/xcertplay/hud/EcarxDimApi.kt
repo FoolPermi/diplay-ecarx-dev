@@ -181,6 +181,11 @@ internal object EcarxDimApi {
 
     fun notifyTurnByTurnStopped(navi: NaviHandle): EcarxResult = dispatch("notifyTurnByTurnStopped") { navi.api.notifyTurnByTurnStopped() }
 
+    /** This firmware re-sends ongoing navigation even when the mute value is unchanged. */
+    fun updateMuteState(navi: NaviHandle, state: Int): EcarxResult = dispatch("updateMuteState($state)") {
+        navi.api.updateMuteState(state)
+    }
+
     /** Older firmware omits this from the interface even when an implementation exposes it. */
     fun notifyNavigationStatus(navi: NaviHandle, status: Int): EcarxResult {
         val method = runCatching { navi.api.javaClass.getMethod("notifyNavigationStatus", Int::class.javaPrimitiveType!!) }

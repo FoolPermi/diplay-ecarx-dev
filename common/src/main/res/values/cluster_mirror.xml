@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_ecarx_cluster_display">Instrument display</string>
+    <string name="settings_ecarx_cluster_mirror_main">Mirror the centre screen to the cluster (experimental)</string>
+    <string name="settings_ecarx_cluster_mirror_main_description">During navigation, mirror the whole CarPlay picture instead of the independent cluster map. This covers the cluster navigation and media cards. Usually leave this off. Takes effect after reconnecting.</string>
+</resources>

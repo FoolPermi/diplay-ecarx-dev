@@ -68,7 +68,7 @@ class EcarxClusterSafeAreaFlowTest {
         settings.finish()
     }
 
-    @Test fun navigationCardOpensThePhysicalDefaultEditorWithoutChangingPreferences() {
+    @Test fun advancedCardOpensThePhysicalDefaultEditorWithoutChangingPreferences() {
         val entry = entry()
         assertTrue(entry.text.toString().endsWith(settings.getString(R.string.settings_ecarx_cluster_safe_area_default)))
         entry.performClick()
@@ -81,11 +81,12 @@ class EcarxClusterSafeAreaFlowTest {
     @Test fun legacyMirrorPreferenceCannotDisableTheIndependentDisplay() {
         settings.getSharedPreferences("xcertplay_airplay", 0).edit()
             .putBoolean("cluster_mirror_main", true).commit()
-        val controls = views(navigationSettings()).filterIsInstance<Switch>().toList()
-        assertTrue(controls.any {
+        val controls = views(advancedSettings()).filterIsInstance<Switch>().toList()
+        assertFalse(controls.any {
             it.contentDescription.toString() == settings.getString(R.string.ecarx_instrument_cluster_projection)
         })
-        assertFalse(controls.any { it.contentDescription.toString().contains("Mirror CarPlay to the cluster") })
+        assertFalse(controls.single { it.contentDescription ==
+            settings.getString(R.string.settings_ecarx_cluster_mirror_main) }.isChecked)
         val displays = AirPlayInfoPlist.build(config())["displays"] as List<*>
         assertEquals(listOf(110, 111), displays.map { (it as Map<*, *>)["type"] })
     }
@@ -215,7 +216,7 @@ class EcarxClusterSafeAreaFlowTest {
         shadowOf(settings.packageManager).removePackage("com.ecarx.xui.service")
         AirPlayPersistence.saveClusterSafeAreaRect(settings, original)
         AirPlayPersistence.saveClusterMapEnabled(settings, true)
-        assertFalse(views(navigationSettings()).filterIsInstance<Button>().any {
+        assertFalse(views(advancedSettings()).filterIsInstance<Button>().any {
             it.text.toString().startsWith(settings.getString(R.string.settings_ecarx_cluster_safe_area))
         })
         val virtual = config().cluster!!
@@ -224,10 +225,10 @@ class EcarxClusterSafeAreaFlowTest {
         assertEquals(AirPlayInsets(top = 57, bottom = 57, left = 102, right = 102), virtual.safeArea)
     }
 
-    private fun navigationSettings(): LinearLayout {
+    private fun advancedSettings(): LinearLayout {
         ReflectionHelpers.setField(settings, "page", "settings")
         ReflectionHelpers.setField(settings, "settingsSectionFilter",
-            SettingsInformationArchitecture.sectionsByCategory.getValue(SettingsCategory.NAVIGATION).toSet())
+            setOf(SettingsSection.ECARX_CLUSTER_DISPLAY))
         return LinearLayout(settings).apply {
             orientation = LinearLayout.VERTICAL
             settings.javaClass.getDeclaredMethod("allSettingsSections", LinearLayout::class.java)
@@ -235,7 +236,7 @@ class EcarxClusterSafeAreaFlowTest {
         }
     }
 
-    private fun entry() = views(navigationSettings()).filterIsInstance<Button>().single {
+    private fun entry() = views(advancedSettings()).filterIsInstance<Button>().single {
         it.text.toString().startsWith(settings.getString(R.string.settings_ecarx_cluster_safe_area) + " · ")
     }
 
