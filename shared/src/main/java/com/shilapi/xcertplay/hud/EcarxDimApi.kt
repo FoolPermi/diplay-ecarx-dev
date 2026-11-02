@@ -231,6 +231,26 @@ internal object EcarxDimApi {
         null
     }
 
+    /** Firmware framework entry points forward straight to DIM without AdaptAPI's value cache. */
+    fun replayTurn(id: Int?, svg: String?, meters: Int, road: String): String {
+        val manager = runCatching {
+            Class.forName("android.cevt.dimsupportservice.DimSupportManager").getMethod("getNavigationManager").invoke(null)
+        }.getOrElse { return "manager=${it.javaClass.simpleName}" } ?: return "manager=unavailable"
+        val type = manager.javaClass
+        val icon = id?.toString() ?: svg
+        val arrow = icon?.let {
+            runCatching {
+                type.getMethod("updateTurnByTurnIcon", Int::class.javaPrimitiveType, String::class.java)
+                    .invoke(manager, if (id != null) 0 else 1, it)
+            }.exceptionOrNull()?.let { error -> (error.cause ?: error).javaClass.simpleName } ?: "sent"
+        } ?: "skipped"
+        val next = runCatching {
+            type.getMethod("updateTurnByTurnNextTurn", Int::class.javaPrimitiveType, String::class.java)
+                .invoke(manager, meters, road)
+        }.exceptionOrNull()?.let { (it.cause ?: it).javaClass.simpleName } ?: "sent"
+        return "icon=$arrow nextTurn=$next"
+    }
+
     private inline fun dispatch(label: String, action: () -> Unit): EcarxResult = runCatching { action() }
         .fold({ EcarxResult.ok(label) }, { EcarxResult.failed("$label threw ${describe(it)}") })
 

@@ -695,6 +695,37 @@ class EcarxLaneGuidanceFlowTest {
         assertEquals(0L, calls("updateNavigationInfo").last().payload["getDistanceToNextGuidancePoint"])
     }
 
+    @Test fun unchangedTurnReplaysOncePerLayoutAndNeverAfterRouteEnd() {
+        val writes = android.cevt.dimsupportservice.DimSupportManager.writes
+        writes.clear()
+        initialize(); maneuver(road = ""); guidance(distance = 173)
+        fun option(value: Int) {
+            DimInteraction.instance().callback.onShowPresentationOptionChanged(value)
+            shadowOf(Looper.getMainLooper()).idle()
+        }
+        fun switch(show: Boolean) = assertTrue(NavigationOutputs.requestPresentation(context, show, "test surface"))
+        switch(true)
+        val first = writes.toList()
+        assertEquals(2, first.size)
+        assertTrue(first[0].startsWith("0:"))
+        assertEquals("173:", first[1])
+        repeat(5) { tick() }
+        assertEquals(first, writes)
+        option(3); switch(false)
+        assertEquals(first, writes)
+        guidance(distance = 168)
+        NavigationOutputs.onClusterWindowHidden()
+        NavigationOutputs.onClusterWindowHidden()
+        val latest = listOf(first[0], "168:")
+        assertEquals(first + latest, writes)
+        option(2); switch(true)
+        assertEquals(first + latest + latest, writes)
+        option(3); switch(false)
+        send(0x5201) { u8(1, 0) }
+        NavigationOutputs.onClusterWindowHidden()
+        assertEquals(first + latest + latest, writes)
+    }
+
     @Test fun repeatedMapDeliveryRestoresTheFinalEventAndLiveLaneData() {
         initialize(); maneuver(); guidance()
         send(0x5204) {
