@@ -101,7 +101,6 @@ class EcarxLaneGuidanceFlowTest {
         context.getSharedPreferences("diplay_ecarx_outputs_v2", Context.MODE_PRIVATE).edit().clear().commit()
         context.getSharedPreferences("diplay_factory_navigation_control", Context.MODE_PRIVATE).edit().clear().commit()
         EcarxOutputSettings.setMediaEnabled(context, false)
-        EcarxOutputSettings.setPresentationSwitch(context, true)
         NavigationOutputs.setClusterPanelOwner { panelRequests += it }
         EcarxHudBridge.attachReport { reports += it }
         reports.clear()
@@ -124,10 +123,9 @@ class EcarxLaneGuidanceFlowTest {
         DimInteraction.reset()
     }
 
-    @Test fun laneFramesReachTypedDimArrayThroughTheProductionWorkerAndSwitch() {
-        assertTrue(EcarxOutputSettings.laneGuidanceEnabled(context))
-        EcarxOutputSettings.setLaneGuidanceEnabled(context, false)
-        assertFalse(EcarxOutputSettings.laneGuidanceEnabled(context))
+    @Test fun laneFramesAutomaticallyReachTypedDimArrayDespiteLegacyDisabledPreferences() {
+        context.getSharedPreferences("diplay_ecarx_outputs_v2", Context.MODE_PRIVATE).edit()
+            .putBoolean("dim_navigation_enabled", false).putBoolean("dim_lane_guidance_enabled", false).commit()
         val frame = Iap2Frame(0x5204, hex(
             "00 06 00 00 00 2a 00 06 00 01 00 00" +
                 " 00 15 00 02 00 06 00 00 00 00 00 05 00 01 00 00 06 00 02 ff a6" +
@@ -141,13 +139,6 @@ class EcarxLaneGuidanceFlowTest {
         NavigationOutputs.onFrame(Iap2Messages.buildRaw(0x5201) {
             u8(1, 1); u16List(0x0d, listOf(7)); u32(0x0a, 100)
         })
-        NavigationOutputs.onFrame(frame)
-        awaitOutputWorker()
-        assertTrue(calls("updateLaneInfo").isEmpty())
-
-        EcarxOutputSettings.setLaneGuidanceEnabled(context, true)
-        NavigationOutputs.ecarxChanged(context)
-        awaitOutputWorker()
         NavigationOutputs.onFrame(frame)
         awaitOutputWorker()
         assertEquals(listOf(
@@ -174,8 +165,7 @@ class EcarxLaneGuidanceFlowTest {
         assertNull(calls("updateLaneInfo").last().payload["lanes"])
         NavigationOutputs.onFrame(frame)
         awaitOutputWorker()
-        EcarxOutputSettings.setLaneGuidanceEnabled(context, false)
-        NavigationOutputs.ecarxChanged(context)
+        NavigationOutputs.endNow()
         awaitOutputWorker()
         assertNull(calls("updateLaneInfo").last().payload["lanes"])
     }
@@ -240,16 +230,11 @@ class EcarxLaneGuidanceFlowTest {
         assertEquals(afterEnd, calls("updateLaneInfo").size)
     }
 
-    @Test fun pendingLanesAreWithdrawnOnDisconnectExplicitClearAndDisabledSetting() {
+    @Test fun pendingLanesAreWithdrawnOnDisconnectAndExplicitClear() {
         initialize()
         for (clear in listOf<() -> Unit>(
             { EcarxHudBridge.clear() },
             { send(0x5204) {} },
-            {
-                EcarxOutputSettings.setLaneGuidanceEnabled(context, false)
-                EcarxHudBridge.settingsChanged()
-                EcarxOutputSettings.setLaneGuidanceEnabled(context, true)
-            },
         )) {
             send(0x5204) {
                 u16(0, 42); u16(1, 0); group(2) { u16(0, 0); u8(1, 2); i16(2, 90) }
@@ -279,14 +264,20 @@ class EcarxLaneGuidanceFlowTest {
         }
     }
 
-    @Test fun startupKeepsSavedVisibilityWithoutRestoringAMirror() {
-        EcarxOutputSettings.setPresentationSwitch(context, true)
-        NavigationOutputs.onAppOpened(context)
-        assertTrue(EcarxOutputSettings.presentationSwitch(context))
-        repeat(12) { tick() }
-        assertTrue(calls("setPresentationToDimSwitch").isEmpty())
-        assertFalse(EcarxOutputSettings.presentationReleasePending(context))
-        assertTrue(panelRequests.isEmpty())
+    @Test fun coldStartDefaultsToVisibleRegardlessOfLegacyPreference() {
+        for (saved in listOf(false, true)) {
+            set("context", null)
+            DimInteraction.reset()
+            val prefs = context.getSharedPreferences("diplay_ecarx_outputs_v2", Context.MODE_PRIVATE)
+            prefs.edit().clear().putBoolean("dim_presentation_switch", saved).commit()
+            NavigationOutputs.onAppOpened(context)
+            assertTrue(field("clusterVisibleWanted").getBoolean(EcarxHudBridge))
+            assertFalse(prefs.contains("dim_presentation_switch"))
+            repeat(12) { tick() }
+            assertTrue(calls("setPresentationToDimSwitch").none { it.payload["show"] == true })
+            assertFalse(EcarxOutputSettings.presentationReleasePending(context))
+            assertTrue(panelRequests.isEmpty())
+        }
     }
 
     @Test fun allDisplayControlsShareIntentAndRepeatedEventsRepairThePanel() {
@@ -305,19 +296,10 @@ class EcarxLaneGuidanceFlowTest {
         NavigationOutputs.requestPresentation(context, false, "cluster surface detached")
         fly(2); fly(2)
         assertEquals(listOf(true, false, false, true, true), panelRequests)
-        assertTrue(EcarxOutputSettings.presentationSwitch(context))
-        NavigationOutputs.requestPresentation(context, false, "settings-off", fromSettings = true)
-        assertFalse(panelRequests.last())
-        fly(2) // Same platform option must override the newer settings-off intent.
+        assertTrue(field("clusterVisibleWanted").getBoolean(EcarxHudBridge))
+        fly(1)
         assertTrue(panelRequests.last())
-        assertTrue(EcarxOutputSettings.presentationSwitch(context))
-        fly(3)
-        val count = calls("setPresentationToDimSwitch").size
-        NavigationOutputs.requestPresentation(context, true, "settings-on", fromSettings = true)
-        assertTrue(panelRequests.last())
-        assertTrue(EcarxOutputSettings.presentationSwitch(context))
-        assertEquals("Settings never opens a platform mirror before its window", count,
-            calls("setPresentationToDimSwitch").size)
+        assertEquals(1, field("presentationOption").getInt(EcarxHudBridge))
     }
 
     @Test fun navigationDetailsFollowTheDebugSwitchWithoutStoppingOutput() {
@@ -337,19 +319,25 @@ class EcarxLaneGuidanceFlowTest {
         assertFalse(reports.any { it.startsWith("DIM input") || it.startsWith("DIM publish") })
     }
 
-    @Test fun unknownPlatformPolicyDoesNotOpenWithoutAnExplicitSavedChoice() {
+    @Test fun unknownPlatformPolicyUsesDefaultIntentButWaitsForRouteAndSurface() {
         context.getSharedPreferences("diplay_ecarx_outputs_v2", Context.MODE_PRIVATE).edit().clear().commit()
-        initialize(); maneuver(); guidance()
-        assertFalse(panelRequests.last())
-        assertFalse(NavigationOutputs.requestPresentation(context, true, "stale surface"))
+        initialize()
+        assertFalse(NavigationOutputs.requestPresentation(context, true, "early surface"))
         assertTrue(calls("setPresentationToDimSwitch").isEmpty())
+        maneuver(); guidance()
+        assertTrue(panelRequests.last())
+        assertTrue(calls("setPresentationToDimSwitch").isEmpty())
+        assertTrue(NavigationOutputs.requestPresentation(context, true, "ready surface"))
     }
 
-    @Test fun aHiddenChoiceSurvivesProcessReinitializationAndANewRoute() {
+    @Test fun aHiddenChoiceSurvivesReconnectionButColdStartRestoresTheDefault() {
         initialize(); maneuver(); guidance()
         DimInteraction.instance().callback.onShowPresentationOptionChanged(3)
         shadowOf(Looper.getMainLooper()).idle()
-        assertFalse(EcarxOutputSettings.presentationSwitch(context))
+        assertFalse(field("clusterVisibleWanted").getBoolean(EcarxHudBridge))
+        EcarxHudBridge.clear()
+        initialize(); maneuver(); guidance()
+        assertFalse(panelRequests.last())
         EcarxHudBridge.clear()
         for (name in listOf("context", "dim", "navi", "dimCallback", "naviCallback")) set(name, null)
         set("presentationOption", 0)
@@ -359,8 +347,8 @@ class EcarxLaneGuidanceFlowTest {
         panelRequests.clear()
         initialize(); maneuver(); guidance()
         assertTrue(EcarxHudBridge.isActive())
-        assertFalse(panelRequests.last())
-        assertFalse(EcarxOutputSettings.presentationSwitch(context))
+        assertTrue(panelRequests.last())
+        assertTrue(field("clusterVisibleWanted").getBoolean(EcarxHudBridge))
         assertTrue(calls("setPresentationToDimSwitch").isEmpty())
     }
 
@@ -369,7 +357,7 @@ class EcarxLaneGuidanceFlowTest {
         NavigationOutputs.requestPresentation(context, true, "cluster surface ready")
         send(0x5201) { u8(1, 0) }
         NavigationOutputs.requestPresentation(context, false, "cluster surface detached")
-        assertTrue(EcarxOutputSettings.presentationSwitch(context))
+        assertTrue(field("clusterVisibleWanted").getBoolean(EcarxHudBridge))
         assertFalse(panelRequests.last())
         maneuver(); guidance()
         assertTrue(panelRequests.last())
@@ -393,7 +381,6 @@ class EcarxLaneGuidanceFlowTest {
 
     @Test fun wheelExitWaitsForThePhoneBeforeClearingClusterGuidance() {
         initialize()
-        EcarxHudBridge.setVisibilityIntent(true, "test")
         maneuver(); guidance()
         var requests = 0
         NavigationOutputs.requestNavigationExit = { requests++; true }
@@ -410,7 +397,7 @@ class EcarxLaneGuidanceFlowTest {
         assertNull(route.current())
         assertEquals(stopped + 1, calls("notifyTurnByTurnStopped").size)
         assertFalse(panelRequests.last())
-        assertTrue(EcarxOutputSettings.presentationSwitch(context))
+        assertTrue(field("clusterVisibleWanted").getBoolean(EcarxHudBridge))
     }
 
     @Test fun startupWithoutResidueDoesNotTouchProjection() {
@@ -420,7 +407,8 @@ class EcarxLaneGuidanceFlowTest {
     }
 
     @Test fun startupReleaseWorksWithNavigationDisabledAndWaitsForDim() {
-        EcarxOutputSettings.setEnabled(context, false)
+        context.getSharedPreferences("diplay_ecarx_outputs_v2", Context.MODE_PRIVATE).edit()
+            .putBoolean("dim_navigation_enabled", false).commit()
         EcarxOutputSettings.setPresentationReleasePending(context, true)
         DimInteraction.nullCreate = true
         NavigationOutputs.onAppOpened(context)
@@ -434,15 +422,17 @@ class EcarxLaneGuidanceFlowTest {
     }
 
     @Test fun legacyResidueSurvivesAnotherStartupBeforeDimIsReady() {
-        EcarxOutputSettings.setPresentationSwitch(context, true)
+        context.getSharedPreferences("diplay_ecarx_outputs_v2", Context.MODE_PRIVATE).edit()
+            .putBoolean("dim_presentation_switch", true).commit()
         EcarxOutputSettings.setPresentationReleasePending(context, true)
         DimInteraction.nullCreate = true
         NavigationOutputs.onAppOpened(context)
-        assertTrue(EcarxOutputSettings.presentationSwitch(context))
+        assertTrue(field("clusterVisibleWanted").getBoolean(EcarxHudBridge))
         assertTrue(EcarxOutputSettings.presentationReleasePending(context))
         set("context", null)
         set("releaseStalePresentation", false)
-        EcarxOutputSettings.setEnabled(context, false)
+        context.getSharedPreferences("diplay_ecarx_outputs_v2", Context.MODE_PRIVATE).edit()
+            .putBoolean("dim_navigation_enabled", false).commit()
         NavigationOutputs.onAppOpened(context)
         DimInteraction.nullCreate = false
         tick()
@@ -484,7 +474,7 @@ class EcarxLaneGuidanceFlowTest {
         EcarxOutputSettings.setPresentationReleasePending(context, true)
         DimInteraction.nullCreate = true
         NavigationOutputs.onAppOpened(context)
-        NavigationOutputs.requestPresentation(context, true, "settings-on", fromSettings = true)
+        assertFalse(NavigationOutputs.requestPresentation(context, true, "early surface"))
         assertTrue(calls("setPresentationToDimSwitch").isEmpty())
         DimInteraction.nullCreate = false
         tick()
@@ -498,7 +488,7 @@ class EcarxLaneGuidanceFlowTest {
         assertTrue(calls("setPresentationToDimSwitch").all { it.payload["show"] == true })
         NavigationOutputs.requestPresentation(context, false, "cluster surface detached")
         assertFalse(EcarxOutputSettings.presentationReleasePending(context))
-        assertTrue("Window cleanup must not erase the user choice", EcarxOutputSettings.presentationSwitch(context))
+        assertTrue("Window cleanup must not erase the user choice", field("clusterVisibleWanted").getBoolean(EcarxHudBridge))
     }
 
     @Test fun currentFailedCloseCancelsStartupRetriesButPreservesResidueForNextLaunch() {
@@ -514,8 +504,8 @@ class EcarxLaneGuidanceFlowTest {
 
     @Test fun manualDisplayIntentWaitsForTheWindowAndStopsRetriesWhenHidden() {
         initialize(); maneuver(); guidance()
-        assertTrue(NavigationOutputs.requestPresentation(context, true, "settings-on", fromSettings = true))
-        assertTrue(EcarxOutputSettings.presentationSwitch(context))
+        assertTrue(field("clusterVisibleWanted").getBoolean(EcarxHudBridge))
+        assertTrue(field("clusterVisibleWanted").getBoolean(EcarxHudBridge))
         assertTrue(calls("setPresentationToDimSwitch").isEmpty())
         NavigationOutputs.requestPresentation(context, true, "cluster surface ready")
         val enabled = calls("setPresentationToDimSwitch").single().payload
@@ -525,8 +515,9 @@ class EcarxLaneGuidanceFlowTest {
         assertEquals("", enabled["className"])
         repeat(12) { tick() }
         assertTrue(calls("setPresentationToDimSwitch").size > 1)
-        NavigationOutputs.requestPresentation(context, false, "settings-off", fromSettings = true)
-        assertFalse(EcarxOutputSettings.presentationSwitch(context))
+        DimInteraction.instance().callback.onShowPresentationOptionChanged(3)
+        shadowOf(Looper.getMainLooper()).idle()
+        assertFalse(field("clusterVisibleWanted").getBoolean(EcarxHudBridge))
         NavigationOutputs.requestPresentation(context, false, "cluster surface detached")
         val stopped = calls("setPresentationToDimSwitch").size
         repeat(12) { tick() }
@@ -536,8 +527,9 @@ class EcarxLaneGuidanceFlowTest {
     @Test fun aSavedChoiceWaitsForTheDimServiceAndRouteBeforeDelivery() {
         DimInteraction.nullCreate = true
         assertTrue(EcarxCapabilities.detect(context).identified)
-        assertTrue(NavigationOutputs.requestPresentation(context, true, "settings-on", fromSettings = true))
-        assertTrue(EcarxOutputSettings.presentationSwitch(context))
+        initialize()
+        assertTrue(field("clusterVisibleWanted").getBoolean(EcarxHudBridge))
+        assertTrue(field("clusterVisibleWanted").getBoolean(EcarxHudBridge))
         assertTrue(calls("setPresentationToDimSwitch").isEmpty())
         DimInteraction.nullCreate = false
         tick()
@@ -553,14 +545,68 @@ class EcarxLaneGuidanceFlowTest {
         DimInteraction.nullCreate = true
         assertTrue(NavigationOutputs.requestPresentation(context, true, "cluster surface ready"))
         assertFalse(NavigationOutputs.requestPresentation(context, false, "cluster surface detached"))
-        assertTrue(EcarxOutputSettings.presentationSwitch(context))
+        assertTrue(field("clusterVisibleWanted").getBoolean(EcarxHudBridge))
         DimInteraction.nullCreate = false
         repeat(12) { tick() }
         assertTrue(calls("setPresentationToDimSwitch").isEmpty())
     }
 
+    @Test fun hidingTheMapPreservesNavigationAndLanesWithAndWithoutAnUnconsumedResend() {
+        initialize(); maneuver(); guidance()
+        send(0x5204) {
+            u16(0, 42); u16(1, 0); group(2) { u16(0, 0); u8(1, 2); i16(2, 90) }
+        }
+        val lane = calls("updateLaneInfo").last().payload["lanes"]
+        for (consumeResend in listOf(false, true)) {
+            DimInteraction.instance().callback.onShowPresentationOptionChanged(2)
+            shadowOf(Looper.getMainLooper()).idle()
+            assertTrue(NavigationOutputs.requestPresentation(context, true, "ready surface"))
+            if (consumeResend) guidance(distance = 300)
+            assertEquals(!consumeResend, DimInteraction.navi.resendOngoing)
+            DimInteraction.instance().callback.onShowPresentationOptionChanged(3)
+            shadowOf(Looper.getMainLooper()).idle()
+            assertTrue(NavigationOutputs.requestPresentation(context, false, "surface detached"))
+            assertFalse(panelRequests.last())
+            assertTrue(EcarxHudBridge.isActive())
+            assertTrue(DimInteraction.navi.ongoingNavigationActive)
+            assertTrue("DIM must be active even when the SDK deduplicates the aggregate", DimInteraction.navi.handlerNavigationActive)
+            assertFalse(DimInteraction.navi.navigationMute)
+            assertEquals(lane, calls("updateLaneInfo").last().payload["lanes"])
+            assertTrue(calls("notifyTurnByTurnStopped").isEmpty())
+            assertTrue(DimInteraction.navi.ongoingTransitions.all { it })
+        }
+        guidance(distance = 125)
+        send(0x5204) {
+            u16(0, 42); u16(1, 0); group(2) { u16(0, 0); u8(1, 2); i16(2, -90) }
+        }
+        assertFalse(panelRequests.last())
+        assertEquals(125L, calls("updateNavigationInfo").last().payload["getDistanceToNextGuidancePoint"])
+        assertEquals(16, ((calls("updateLaneInfo").last().payload["lanes"] as List<*>).single() as Map<*, *>)["iconId"])
+        assertTrue(DimInteraction.navi.handlerNavigationActive)
+        val restored = calls("updateMuteState").size
+        send(0x5201) { u8(1, 0) }
+        NavigationOutputs.requestPresentation(context, false, "route ended")
+        assertFalse(DimInteraction.navi.handlerNavigationActive)
+        assertEquals(restored, calls("updateMuteState").size)
+        assertNull(calls("updateLaneInfo").last().payload["lanes"])
+    }
+
+    @Test fun aHideBeforeGuidanceCannotBeOverriddenByLateServiceOrRetry() {
+        DimInteraction.nullNavi = true
+        initialize()
+        DimInteraction.instance().callback.onShowPresentationOptionChanged(3)
+        shadowOf(Looper.getMainLooper()).idle()
+        maneuver(); guidance()
+        DimInteraction.nullNavi = false
+        repeat(12) { tick() }
+        initialize()
+        assertTrue(EcarxHudBridge.isActive())
+        assertFalse(panelRequests.last())
+        assertFalse(NavigationOutputs.requestPresentation(context, true, "late surface"))
+        assertTrue(calls("setPresentationToDimSwitch").isEmpty())
+    }
+
     @Test fun laneStateClearsOnEndExpiryAndDisconnectWithoutReviving() {
-        EcarxOutputSettings.setLaneGuidanceEnabled(context, true)
         initialize(); maneuver(); guidance()
         fun lane() = send(0x5204) {
             u16(0, 42); u16(1, 0); group(2) { u16(0, 0); u8(1, 2); i16(2, 90) }
@@ -773,8 +819,7 @@ class EcarxLaneGuidanceFlowTest {
                 2 -> EcarxHudBridge.clear()
                 3 -> { nowNs += 30_000_000_000L; tick() }
                 else -> {
-                    EcarxOutputSettings.setEnabled(context, false)
-                    NavigationOutputs.ecarxChanged(context)
+                    NavigationOutputs.endNow()
                     awaitOutputWorker()
                 }
             }
@@ -875,7 +920,6 @@ class EcarxLaneGuidanceFlowTest {
     }
 
     @Test fun laneWithNoPushedManeuverClearsWithoutSendingNavigationStartOrStop() {
-        EcarxOutputSettings.setLaneGuidanceEnabled(context, true)
         initialize(); maneuver()
         FixtureLog.failOnce("updateNavigationInfo")
         guidance()
@@ -891,7 +935,6 @@ class EcarxLaneGuidanceFlowTest {
     }
 
     @Test fun rejectedLaneWriteIsReportedAndRetriedOnExistingTicker() {
-        EcarxOutputSettings.setLaneGuidanceEnabled(context, true)
         initialize(); maneuver(); guidance()
         FixtureLog.failOnce("updateLaneInfo")
         send(0x5204) {

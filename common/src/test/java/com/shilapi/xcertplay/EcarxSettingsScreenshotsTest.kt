@@ -1,6 +1,7 @@
 package com.shilapi.xcertplay
 
 import android.app.Dialog
+import android.content.pm.PackageInfo
 import android.os.Looper
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -32,6 +33,7 @@ class EcarxSettingsScreenshotsTest {
         val name = "current-head-unit"
         val activity = Robolectric.buildActivity(DiPlayActivity::class.java).get()
         activity.setTheme(android.R.style.Theme_Material_NoActionBar)
+        shadowOf(activity.packageManager).installPackage(PackageInfo().apply { packageName = "com.ecarx.xui.service" })
         AirPlayPersistence.clearClusterSafeAreaRect(activity)
         val output = File("build/reports/ecarx-settings-ui").apply { mkdirs() }
         try {
@@ -44,15 +46,9 @@ class EcarxSettingsScreenshotsTest {
             }
             // Build the actual card so its normal spacing pass is included in the screenshot.
             ReflectionHelpers.setField(activity, "page", "settings")
-            activity.javaClass.getDeclaredMethod("section", LinearLayout::class.java, String::class.java,
-                Int::class.javaObjectType, kotlin.jvm.functions.Function1::class.java)
-                .apply { isAccessible = true }.invoke(activity, navigation,
-                    activity.getString(R.string.ecarx_navigation), R.drawable.ic_dp_navigation,
-                    { card: LinearLayout ->
-                        activity.javaClass.getDeclaredMethod("ecarxNavigationOutputs", LinearLayout::class.java)
-                            .apply { isAccessible = true }.invoke(activity, card)
-                        Unit
-                    })
+            ReflectionHelpers.setField(activity, "settingsSectionFilter", setOf(SettingsSection.ECARX_CLUSTER_DISPLAY))
+            activity.javaClass.getDeclaredMethod("allSettingsSections", LinearLayout::class.java)
+                .apply { isAccessible = true }.invoke(activity, navigation)
             val cluster = navigation.getChildAt(0) as ViewGroup
             render(cluster, width, File(output, "cluster-controls-$name.png"))
             views(cluster).filterIsInstance<Button>().single {
@@ -92,6 +88,7 @@ class EcarxSettingsScreenshotsTest {
             dialog.dismiss()
 
         } finally {
+            shadowOf(activity.packageManager).removePackage("com.ecarx.xui.service")
             ReflectionHelpers.getField<Dialog?>(activity, "clusterSafeAreaDialog")?.dismiss()
             activity.finish()
         }

@@ -9,6 +9,9 @@ import java.util.Map;
 public class NaviFixture implements INaviInteraction {
     public INavigationInteractionCallback callback;
     public boolean ongoingNavigationActive;
+    public boolean handlerNavigationActive;
+    public boolean resendOngoing;
+    public boolean navigationMute;
     public final List<Boolean> ongoingTransitions = new ArrayList<>();
     public void updateNavigationInfo(INavigationInfo i) {
         FixtureLog.capture("updateNavigationInfo",
@@ -22,10 +25,14 @@ public class NaviFixture implements INaviInteraction {
             "getNavigationTurnSVG", i.getNavigationTurnSVG(),
             "getHighwayExitInfo", i.getHighwayExitInfo(),
             "getRoadCameraInfo", i.getRoadCameraInfo(), "getServiceAreaInfo", i.getServiceAreaInfo());
-        // Recovered NaviInteraction only sends ongoing navigation when active changes (mute stays 0 here).
+        // Match the recovered SDK's deduplication and one-shot resend, independently of DIM state.
         boolean active = i.getNavigationStatus() == 1;
-        if (active != ongoingNavigationActive) {
+        boolean mute = i.getMuteState() == 1;
+        if (active != ongoingNavigationActive || mute != navigationMute || (resendOngoing && active)) {
             ongoingNavigationActive = active;
+            navigationMute = mute;
+            handlerNavigationActive = active;
+            resendOngoing = false;
             ongoingTransitions.add(active);
         }
     }
@@ -52,7 +59,13 @@ public class NaviFixture implements INaviInteraction {
             "componentType", ILaneInfo.class.getName());
     }
     public void updateDriveDirection(int direction) { FixtureLog.capture("updateDriveDirection", "direction", direction); }
-    public void updateMuteState(int state) { FixtureLog.capture("updateMuteState", "state", state); }
+    public void updateMuteState(int state) {
+        FixtureLog.capture("updateMuteState", "state", state);
+        navigationMute = state == 1;
+        handlerNavigationActive = ongoingNavigationActive;
+        resendOngoing = false;
+        ongoingTransitions.add(ongoingNavigationActive);
+    }
     public void notifyTurnByTurnStarted() { FixtureLog.capture("notifyTurnByTurnStarted"); }
     public void notifyTurnByTurnStopped() { FixtureLog.capture("notifyTurnByTurnStopped"); }
     public void registerNavigationInteractionCallback(INavigationInteractionCallback value) {

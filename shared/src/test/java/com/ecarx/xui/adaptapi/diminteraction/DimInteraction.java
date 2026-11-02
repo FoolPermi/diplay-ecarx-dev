@@ -31,6 +31,9 @@ public final class DimInteraction {
         INSTANCE.callback = null;
         navi.callback = null;
         navi.ongoingNavigationActive = false;
+        navi.handlerNavigationActive = false;
+        navi.resendOngoing = false;
+        navi.navigationMute = false;
         navi.ongoingTransitions.clear();
         FixtureLog.reset();
     }
@@ -54,6 +57,8 @@ public final class DimInteraction {
         FixtureLog.capture("setPresentationToDimSwitch", "screenId", screenId,
             "packageName", packageName, "className", className, "show", show);
         if (failPresentation) throw new IllegalStateException("DIM projection unavailable");
+        if (show && navi.ongoingNavigationActive) navi.resendOngoing = true;
+        if (!show) navi.handlerNavigationActive = false;
     }
     public void registerInteractionCallback(IInteractionCallback value) {
         FixtureLog.capture("registerInteractionCallback");

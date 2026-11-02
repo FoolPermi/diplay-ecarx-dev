@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_ecarx_cluster_display">儀表顯示</string>
+    <string name="settings_ecarx_cluster_mirror_main">整個畫面鏡像到儀表（實驗性）</string>
+    <string name="settings_ecarx_cluster_mirror_main_description">導航時將整個 CarPlay 中控畫面鏡像到儀表，取代獨立地圖，並遮住儀表導航和媒體卡片。通常保持關閉。重新連線後生效。</string>
+</resources>

@@ -115,6 +115,7 @@ internal enum class SettingsSection {
     USB_CONNECTION,
     DISPLAY_AND_PERFORMANCE,
     EXPERIMENTAL_DISPLAY,
+    ECARX_CLUSTER_DISPLAY,
     ADVANCED_MEDIA,
     MEDIA_OUTPUT,
     CAR_BUTTON,
@@ -153,6 +154,7 @@ internal object SettingsInformationArchitecture {
             SettingsSection.AUTHENTICATION,
             SettingsSection.EXTERNAL_CONTROLLER,
             SettingsSection.EXPERIMENTAL_DISPLAY,
+            SettingsSection.ECARX_CLUSTER_DISPLAY,
             SettingsSection.ADVANCED_MEDIA,
             SettingsSection.NAVIGATION_WHEEL,
         ),
@@ -269,19 +271,9 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
         connect(notificationTransport)
     }
-    private var clusterProjectionRow: Switch? = null
-    private var syncingClusterVisibility = false
     private val tick = object : Runnable {
         override fun run() {
             refreshStatus()
-            clusterProjectionRow?.let { row ->
-                val saved = EcarxOutputSettings.presentationSwitch(this@DiPlayActivity)
-                if (row.isChecked != saved) {
-                    syncingClusterVisibility = true
-                    row.isChecked = saved
-                    syncingClusterVisibility = false
-                }
-            }
             if (CarHotspotSettings.enabled(this@DiPlayActivity) &&
                 (page == "home" || page == "connection" || page == "setup")) {
                 val ready = CarHotspotSetup.networkReady(this@DiPlayActivity)
@@ -1955,6 +1947,26 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 SettingsLayoutPreferences.saveForceFull(this, it)
                 render()
             }
+        }
+        if (com.shilapi.xcertplay.hud.EcarxCapabilities.detect(this).identified) filteredSection(content,
+            SettingsSection.ECARX_CLUSTER_DISPLAY, getString(R.string.settings_ecarx_cluster_display),
+            R.drawable.ic_dp_display) { card ->
+            toggle(card, getString(R.string.settings_ecarx_cluster_mirror_main),
+                getString(R.string.settings_ecarx_cluster_mirror_main_description),
+                EcarxOutputSettings.mirrorMainScreen(this)) { enabled ->
+                EcarxOutputSettings.setMirrorMainScreen(this, enabled)
+                markReconnectNeeded()
+            }
+            lateinit var safeAreaButton: Button
+            safeAreaButton = button(getString(R.string.settings_ecarx_cluster_safe_area) + VALUE_SEPARATOR +
+                getString(if (AirPlayPersistence.loadClusterSafeAreaRect(this) == null)
+                    R.string.settings_ecarx_cluster_safe_area_default else R.string.settings_ecarx_cluster_safe_area_custom),
+                false) { openClusterSafeAreaEditor(safeAreaButton) }
+            safeAreaButton.tag = R.string.settings_ecarx_cluster_safe_area
+            safeAreaButton.minHeight = dp(CONTROL_HEIGHT_DP)
+            card.addView(safeAreaButton, LinearLayout.LayoutParams(-1, -2).apply {
+                topMargin = dp(SETTINGS_BLOCK_GAP_DP)
+            })
         }
         filteredSection(content, SettingsSection.EXPERIMENTAL_DISPLAY,
             getString(R.string.settings_experimental_display), R.drawable.ic_dp_display) { card ->
@@ -3990,22 +4002,8 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         ecarxSwKeyHandle = null
     }
 
-    /**
-     * The ECARX (亿咖通) instrument-cluster outputs and the physical stream's safe area.
-     *
-     * Six more used to live here: 投屏窗口包名、箭头实验开关、导航投影轴、媒体投影轴、导航进行中事件、
-     * 集群导航模式. Each was a question the car had already answered, and each wrong answer made the
-     * cluster show nothing — so they now carry their correct value in code and are gone from this
-     * page (fix33). The remaining controls cover cluster guidance, its desktop map copy,
-     * the full-screen mirror, and the media card.
-     */
+    /** The optional desktop copy is independent of automatic instrument guidance. */
     private fun ecarxNavigationOutputs(card: LinearLayout) {
-        toggle(card, getString(R.string.ecarx_navigation_on_instrument_cluster),
-            getString(R.string.ecarx_navigation_on_instrument_cluster_description),
-            EcarxOutputSettings.enabled(this)) {
-            EcarxOutputSettings.setEnabled(this, it)
-            NavigationOutputs.ecarxChanged(this)
-        }
         toggle(card, getString(R.string.center_map_follows_dashboard),
             getString(R.string.center_map_follows_dashboard_description),
             AirPlayPersistence.loadCenterMapOverlay(this) && AirPlayPersistence.loadCenterMapFollowsDashboard(this)) { on ->
@@ -4016,27 +4014,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 CenterMapOverlay.scheduleShow()
             } else CenterMapOverlay.hide()
         }
-        toggle(card, getString(R.string.settings_ecarx_lane_guidance),
-            getString(R.string.settings_ecarx_lane_guidance_description),
-            EcarxOutputSettings.laneGuidanceEnabled(this)) {
-            EcarxOutputSettings.setLaneGuidanceEnabled(this, it)
-            NavigationOutputs.ecarxChanged(this)
-        }
-        clusterProjectionRow = toggle(card, getString(R.string.ecarx_instrument_cluster_projection),
-            getString(R.string.ecarx_instrument_cluster_projection_description),
-            EcarxOutputSettings.presentationSwitch(this)) { on ->
-            if (!syncingClusterVisibility) applyClusterVisibility(on)
-        }
-        lateinit var safeAreaButton: Button
-        safeAreaButton = button(getString(R.string.settings_ecarx_cluster_safe_area) + VALUE_SEPARATOR +
-            getString(if (AirPlayPersistence.loadClusterSafeAreaRect(this) == null)
-                R.string.settings_ecarx_cluster_safe_area_default else R.string.settings_ecarx_cluster_safe_area_custom),
-            false) { openClusterSafeAreaEditor(safeAreaButton) }
-        safeAreaButton.tag = R.string.settings_ecarx_cluster_safe_area
-        safeAreaButton.minHeight = dp(CONTROL_HEIGHT_DP)
-        card.addView(safeAreaButton, LinearLayout.LayoutParams(-1, -2).apply {
-            topMargin = dp(SETTINGS_BLOCK_GAP_DP)
-        })
+
     }
 
     private fun openClusterSafeAreaEditor(setting: Button) {
@@ -4105,21 +4083,6 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         dialog.window?.setLayout(
             if (isCompactLayout) metrics.widthPixels else (metrics.widthPixels * 0.9f).toInt(),
             if (isCompactLayout) metrics.heightPixels else (metrics.heightPixels * 0.85f).toInt())
-    }
-
-    /**
-     * The cluster's media card. Applies at once: the cluster bridge reads the switch every second, so
-     * nothing has to be restarted and no reconnect is needed.
-     *
-     * Bound as a method reference rather than written as a lambda at the call site because Kotlin
-     * numbers `DiPlayActivity`'s lambda classes by their position in this file — one more lambda
-     * anywhere in here renames every later one and trips the class-set regression check.
-     */
-    private fun applyClusterVisibility(show: Boolean) {
-        val origin = if (show) "settings-on" else "settings-off"
-        if (!NavigationOutputs.requestPresentation(this, show, origin, fromSettings = true)) {
-            toast(getString(R.string.ecarx_cluster_call_rejected))
-        }
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {

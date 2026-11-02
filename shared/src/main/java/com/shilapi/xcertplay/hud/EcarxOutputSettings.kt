@@ -2,42 +2,13 @@ package com.shilapi.xcertplay.hud
 
 import android.content.Context
 
-/**
- * The ECARX instrument-cluster output: three switches, each one a picture the driver can see.
- *
- * Kept in its own preferences file so the ECARX switches never alias another head unit's switches
- * by accident, and so a build that ships the same code on a different head unit has an inert,
- * empty store.
- *
- * **Six switches were removed from this store** (fix33). Every one of them was a question the car
- * had already answered, and leaving them on the settings page meant the driver had to get six
- * answers right before the cluster showed anything — six chances to get it wrong where one would do:
- *
- * | removed | why it is not a question any more |
- * |---|---|
- * | 投屏包名 (`setPresentationToDimSwitch` 的两个字符串) | the platform discards the first three arguments; `""` is what the stock apps send, and the only value measured working on this head unit |
- * | 箭头实验开关 | the ids are settled (`EcarxArrowCode` + the on-car 101–143 sweep), it is not an experiment |
- * | 导航投影轴 (`carPlayNavigation`) | the projection MQTT claim is what turns the cluster's navigation page into a rectangle of mirrored CarPlay — never wanted |
- * | 媒体投影轴 (`carPlayMedia`) | without it the media card reads `无媒体` whatever is pushed; there is no picture in which it should be off |
- * | 导航进行中事件 (`ongoingNavi`) | it raises the floating distance/turn card inside the projection and DiPlay cannot close it again (its `idle` is ignored by this firmware) |
- * | 集群导航模式 (`setNaviMode`) | `ecarx.dimprotocol.DIMProtocolManager` is absent from this system image, so the switch could only ever fail |
- */
+/** Media/mirror preferences and crash recovery; navigation and lanes follow the session automatically. */
 object EcarxOutputSettings {
-    /**
-     * A **new** store in fix33, on purpose.
-     *
-     * The six removed switches left values behind in the old file, and every earlier build shipped
-     * [enabled] and [mediaEnabled] as `false` — so an existing install would keep reading a `false`
-     * the driver chose when those two did nothing useful, and none of the new defaults below would
-     * ever take effect. A fresh store is the only way a default change reaches the car; the three
-     * kept switches then hold the values this build says are right.
-     */
     private const val PREFS = "diplay_ecarx_outputs_v2"
-    private const val KEY_ENABLED = "dim_navigation_enabled"
-    private const val KEY_PRESENTATION = "dim_presentation_switch"
+    private const val KEY_LEGACY_PRESENTATION = "dim_presentation_switch"
     private const val KEY_PRESENTATION_RELEASE_PENDING = "dim_presentation_release_pending"
+    private const val KEY_MIRROR_MAIN = "dim_mirror_main_screen"
     private const val KEY_MEDIA = "dim_media_enabled"
-    private const val KEY_LANE_GUIDANCE = "dim_lane_guidance_enabled"
 
     /**
      * The two string arguments of `DimInteraction.setPresentationToDimSwitch(int,String,String,boolean)`.
@@ -51,33 +22,22 @@ object EcarxOutputSettings {
      */
     const val PRESENTATION_PACKAGE = ""
 
-    /**
-     * Whether CarPlay guidance reaches the cluster at all. **On by default**: this build only ships
-     * on a head unit whose DIM interface was probed, so an untouched install is expected to work
-     * rather than to sit silent until a switch is found.
-     */
-    fun enabled(context: Context): Boolean = prefs(context).getBoolean(KEY_ENABLED, true)
-
-    fun setEnabled(context: Context, enabled: Boolean) {
-        check(prefs(context).edit().putBoolean(KEY_ENABLED, enabled).commit()) {
-            "Could not persist the ECARX navigation output setting"
+    /** An old "on" may own a platform window; it no longer controls this process's display intent. */
+    internal fun retirePresentationSwitch(context: Context) {
+        val saved = prefs(context)
+        if (!saved.contains(KEY_LEGACY_PRESENTATION)) return
+        val pending = saved.getBoolean(KEY_LEGACY_PRESENTATION, false) || presentationReleasePending(context)
+        check(saved.edit().remove(KEY_LEGACY_PRESENTATION)
+            .putBoolean(KEY_PRESENTATION_RELEASE_PENDING, pending).commit()) {
+            "Could not retire the ECARX instrument-cluster projection setting"
         }
     }
 
-    fun laneGuidanceEnabled(context: Context): Boolean = prefs(context).getBoolean(KEY_LANE_GUIDANCE, true)
+    fun mirrorMainScreen(context: Context): Boolean = prefs(context).getBoolean(KEY_MIRROR_MAIN, false)
 
-    fun setLaneGuidanceEnabled(context: Context, enabled: Boolean) {
-        check(prefs(context).edit().putBoolean(KEY_LANE_GUIDANCE, enabled).commit()) {
-            "Could not persist the ECARX lane guidance setting"
-        }
-    }
-
-    /** Last explicit display choice from settings, the cluster controls or a fly-screen gesture. */
-    fun presentationSwitch(context: Context): Boolean = prefs(context).getBoolean(KEY_PRESENTATION, false)
-
-    internal fun setPresentationSwitch(context: Context, enabled: Boolean) {
-        check(prefs(context).edit().putBoolean(KEY_PRESENTATION, enabled).commit()) {
-            "Could not persist the ECARX instrument-cluster projection setting"
+    fun setMirrorMainScreen(context: Context, enabled: Boolean) {
+        check(prefs(context).edit().putBoolean(KEY_MIRROR_MAIN, enabled).commit()) {
+            "Could not persist the ECARX full-screen mirror setting"
         }
     }
 
