@@ -509,21 +509,13 @@ internal object EcarxHudBridge {
         presentedPackage = if (show) packageName else null
         if (!show) {
             context?.let { EcarxOutputSettings.setPresentationReleasePending(it, false) }
-            resendLocked()
         }
+        resendLocked()
         if (NavigationOutputs.debugLogsEnabled()) report("presentation switch -> $show package=\"$packageName\"")
         return result
     }
 
-    /**
-     * Re-sends what the cluster should be showing after something else cleared it.
-     *
-     * Only the delivery bookkeeping is reset, never the guidance: [lastArrowChannel] is what
-     * suppresses a repeat of an unchanged arrow and [ticksSincePush] is what schedules the
-     * keepalive. Releasing the mirror makes the cluster hand its navigation card back to the head
-     * unit, so the arrow leaves the screen while the value it carries never changed — the same
-     * frames have to go out again for the card to be re-pointed at the phone.
-     */
+    /** Both firstFrameReady and naviAppOff replace DIM's cached event; restore live guidance after either. */
     private fun resendLocked() {
         if (lastPushed == null) return
         lastArrowChannel = null
@@ -534,8 +526,7 @@ internal object EcarxHudBridge {
         // A repeated aggregate can be deduplicated after naviAppOff; this public call always sends.
         val active = EcarxDimApi.updateMuteState(naviRef, guidance.muteState)
         pushLaneLocked(force = true)
-        report("DIM navigation restored after map release ${outcome(active)}")
-        if (NavigationOutputs.debugLogsEnabled()) report("DIM re-sent after the mirror was released")
+        report("DIM navigation reasserted after presentation change ${outcome(active)}")
     }
 
     // ---------------------------------------------------------------- push path
@@ -805,6 +796,8 @@ internal object EcarxHudBridge {
             }
             if (guidanceActive) {
                 guidanceActive = false
+                val released = applyPresentation(false, "guidance ended")
+                report("DIM navigation end release ${outcome(released)} detail=${released.reason}")
                 report("DIM guidance ended $lastGuidanceEnd")
                 // Hand the panel back: the presentation stops requesting the cluster stream, so the
                 // head unit's own instrument page returns instead of a frozen last map frame.

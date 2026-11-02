@@ -13,6 +13,15 @@ public class NaviFixture implements INaviInteraction {
     public boolean resendOngoing;
     public boolean navigationMute;
     public final List<Boolean> ongoingTransitions = new ArrayList<>();
+    public final List<String> navigationEvents = new ArrayList<>();
+
+    // Mirrors NavigationHandler: firstFrameReady preserves active but replaces the cached event.
+    public void sendNavigationEvent(String event) {
+        navigationEvents.add(event);
+        FixtureLog.record("navigation:" + event);
+        if (event.equals("ongoingNavi")) handlerNavigationActive = true;
+        else if (!event.equals("firstFrameReady")) handlerNavigationActive = false;
+    }
     public void updateNavigationInfo(INavigationInfo i) {
         FixtureLog.capture("updateNavigationInfo",
             "getNavigationTurnId", i.getNavigationTurnId(),
@@ -31,7 +40,7 @@ public class NaviFixture implements INaviInteraction {
         if (active != ongoingNavigationActive || mute != navigationMute || (resendOngoing && active)) {
             ongoingNavigationActive = active;
             navigationMute = mute;
-            handlerNavigationActive = active;
+            sendNavigationEvent(active ? "ongoingNavi" : "idle");
             resendOngoing = false;
             ongoingTransitions.add(active);
         }
@@ -62,7 +71,7 @@ public class NaviFixture implements INaviInteraction {
     public void updateMuteState(int state) {
         FixtureLog.capture("updateMuteState", "state", state);
         navigationMute = state == 1;
-        handlerNavigationActive = ongoingNavigationActive;
+        sendNavigationEvent(ongoingNavigationActive ? "ongoingNavi" : "idle");
         resendOngoing = false;
         ongoingTransitions.add(ongoingNavigationActive);
     }
