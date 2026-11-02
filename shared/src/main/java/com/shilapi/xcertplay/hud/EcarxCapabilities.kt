@@ -35,11 +35,9 @@ object EcarxCapabilities {
     const val CAR = "com.ecarx.xui.adaptapi.car.Car"
     const val DEVICE = "com.ecarx.xui.adaptapi.device.Device"
 
-    // Microphone arbitration lives on the SDK policy API, not the XUI adaptapi. The reference app
-    // uses `com.ecarx.sdk.policy.PolicyAPI`; the EAS one is the
-    // SDK-side alias that also surfaces IAudioPolicy. Both are probed, the first match wins.
+    // The target's GKUI policy and the newer EAS policy have separate callback/interface types.
+    // Probe only the GKUI contract recovered from this firmware's runtime library.
     const val POLICY_API = "com.ecarx.sdk.policy.PolicyAPI"
-    const val EAS_POLICY_API = "com.ecarx.eas.sdk.policy.api.PolicyAPI"
     const val AUDIO_POLICY = "com.ecarx.sdk.policy.IAudioPolicy"
     const val MIC_CALLBACK = "com.ecarx.sdk.policy.IMicResourceCallback"
 

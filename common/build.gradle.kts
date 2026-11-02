@@ -36,6 +36,7 @@ android {
 }
 
 dependencies {
+    compileOnly(files(rootProject.file("shared/libs/ecarx.adapterapi.jar")))
     api(project(":shared"))
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)

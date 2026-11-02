@@ -44,7 +44,7 @@ class MicrophoneCaptureLifecycleTest {
 
     @Before fun setUp() {
         policy.reset()
-        policy.needed = true
+        PolicyAPI.enabled = true
         CaptureAudioManager.rejectMode = null
         CaptureAudioManager.rejectParameter = null
         MicrophoneSourceFallbackTest.RecorderBuilder.attempts.clear()
@@ -95,7 +95,7 @@ class MicrophoneCaptureLifecycleTest {
         assertTrue(ShadowAudioEffect.getAudioEffects().isEmpty())
         assertTrue(reports.any { it.contains("phase=before-start mode=1") })
         assertTrue(reports.any { it.contains("phase=capture mode=3") })
-        assertTrue(reports.any { it.contains("isNeedRequestMic=true requestType=CALL(2)") })
+        assertTrue(reports.any { it.contains("policyAvailable=true requestType=CALL(2)") })
         assertTrue(reports.any { it.contains("onResume") && it.contains("granted=true") })
 
         sink!!.onMicrophoneStopped(call)
@@ -141,7 +141,7 @@ class MicrophoneCaptureLifecycleTest {
     }
 
     @Test fun unavailableArbitrationDoesNotBlockCapture() {
-        policy.needed = false
+        PolicyAPI.enabled = false
         start()
         assertEquals(0, policy.requests)
         assertTrue(reports.any { it.startsWith("Microphone: start") })

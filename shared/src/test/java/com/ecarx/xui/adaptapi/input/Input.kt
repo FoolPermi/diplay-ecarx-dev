@@ -2,7 +2,7 @@ package com.ecarx.xui.adaptapi.input
 
 import android.content.Context
 
-/** Reflection endpoint fixture; never packaged in an APK. */
+/** Target-firmware endpoint fixture; never packaged in an APK. */
 class Input {
     var requested = intArrayOf()
     var released = intArrayOf()

@@ -4,26 +4,27 @@ import android.content.Context;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
-/** Test boundary for the reflective policy API, disabled for unrelated tests. */
+/** Test implementation of the recovered GKUI contract, disabled for unrelated tests. */
 public final class PolicyAPI {
     private static final PolicyAPI INSTANCE = new PolicyAPI();
     public static final AudioPolicy audio = new AudioPolicy();
-    public static PolicyAPI get(Context context) { return INSTANCE; }
+    public static boolean enabled;
+    public static PolicyAPI get(Context context) { return enabled ? INSTANCE : null; }
     public IAudioPolicy getAudioPolicy() { return audio; }
 
     public static final class AudioPolicy implements IAudioPolicy {
-        public boolean needed, reject, abort, declineRelease;
+        public boolean reject, abort, declineRelease;
         public int requests, releases, requestType;
         public IMicResourceCallback held;
         public final List<String> events = new CopyOnWriteArrayList<>();
 
         public void reset() {
-            needed = reject = abort = declineRelease = false;
+            enabled = reject = abort = declineRelease = false;
             requests = releases = requestType = 0;
             held = null;
             events.clear();
         }
-        public boolean isNeedrequestMic() { return needed; }
+        public int getAudioStreamTypeForFunction(String function) { return 0; }
         public boolean requestMic(int type, IMicResourceCallback callback) {
             events.add("requestMic");
             requests++;

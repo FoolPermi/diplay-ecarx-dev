@@ -660,10 +660,10 @@ class AndroidMediaSink(
     private fun requestMicArbitration(id: AudioStreamId) {
         val context = appContext ?: return
         val policy = com.shilapi.xcertplay.hud.EcarxMicPolicy
-        val needed = policy.isNeedRequestMic(context)
+        val needed = policy.available(context)
         runCatching {
-            onAudioDiagnostic("Audio: ECARX mic policy stream=$id isNeedRequestMic=$needed" +
-                " requestType=CALL(2) ${policy.describe(context)}")
+            onAudioDiagnostic("Audio: ECARX mic policy stream=$id policyAvailable=$needed" +
+                " requestType=CALL(2) ${policy.describe()}")
         }
         if (!needed) return
         micHeld = policy.requestMic(context, policy.REQUEST_TYPE_CALL, object :
