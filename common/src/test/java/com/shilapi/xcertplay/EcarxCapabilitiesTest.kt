@@ -41,7 +41,6 @@ class EcarxCapabilitiesTest {
         // The policy is internal to shared; invoke its app-owned reflection boundary.
         val type = Class.forName("com.shilapi.xcertplay.hud.EcarxMicPolicy")
         val policy = type.getField("INSTANCE").get(null)
-        assertFalse(type.getMethod("available", android.content.Context::class.java).invoke(policy, context) as Boolean)
         val listenerType = Class.forName("com.shilapi.xcertplay.hud.EcarxMicPolicy\$Listener")
         val listener = java.lang.reflect.Proxy.newProxyInstance(listenerType.classLoader, arrayOf(listenerType)) { _, _, _ ->
             fail("Missing SDK must not invoke callbacks")

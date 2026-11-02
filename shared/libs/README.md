@@ -18,3 +18,7 @@ This JAR covers AdaptAPI. The GKUI Policy contract is recovered separately in
 [`sdk/ecarx-policy`](../../sdk/ecarx-policy/README.zh-CN.md), retained for reference and not
 used by the application. SDK microphone policy, MediaCenter, Android hidden APIs and firmware-specific extensions without a matching
 compilation library still use reflection.
+
+The target framework dump reports AdaptAPI 1.1.18.9, rather than the 1.1.17 declarations
+bundled in older apps. See [the SDK and microphone context](../../docs/ECARX_SDK_CONTEXT.zh-CN.md)
+for the ABI check, GKUI initialization lifecycle and the target server's unsupported mic methods.

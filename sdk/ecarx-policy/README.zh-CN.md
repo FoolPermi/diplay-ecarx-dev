@@ -6,6 +6,10 @@
 **当前仅保留接口源码和可独立构建的 JAR，不接入应用，也不作为应用测试依赖。**
 应用当前只将已找到的 AdaptAPI 编译库用于 SDK 直调；麦克风 Policy 继续反射调用。
 
+麦克风已补齐 `init → onAPIReady → requestMic → onResume → releaseMic` 生命周期。
+**本车 OpenAPI 服务端的申请/释放实现仍明确不支持仲裁，初始化成功后也会拒绝申请并回退直接录音。**
+版本差异、服务端实现、dump 校验值及 PR #13 前后行为见[SDK 与麦克风上下文](../../docs/ECARX_SDK_CONTEXT.zh-CN.md)。
+
 ## 来源与版本
 
 来源为本地 dump：
