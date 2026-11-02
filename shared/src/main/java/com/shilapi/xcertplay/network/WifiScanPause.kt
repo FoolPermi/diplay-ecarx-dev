@@ -1,10 +1,10 @@
 package com.shilapi.xcertplay.network
 
 import android.content.Context
+import android.content.pm.PackageManager
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.util.Log
-import com.shilapi.xcertplay.adb.LocalAdb
-import com.shilapi.xcertplay.adb.LocalAdbShell
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.ScheduledFuture
@@ -19,13 +19,11 @@ import java.util.concurrent.TimeUnit
  * so music and voice stutter on a 10 s rhythm. The built-in car hotspot runs with the client off and
  * is not affected, and Same LAN needs the search, so only Wi-Fi Direct sessions pause it.
  *
- * Android offers apps no way to do this. Through the approved local adb shell, [WifiScanPauseMain]
- * runs as the shell user and turns off the framework's automatic joining, which stops these scans:
- * `enableWifiConnectivityManager` on Android 7.1-10 and `allowAutojoinGlobal` on Android 11+. One
+ * The Android 9 platform grant lets the app directly switch automatic joining:
+ * `enableWifiConnectivityManager`. One
  * process-wide worker owns controller leases and restores the search only after the last lease
  * ends. A durable marker precedes every disable; failed restores retry and recover when the app
- * next opens, and the framework resets the setting itself when the car restarts. Nothing happens
- * without adb approval, and this never asks for it.
+ * next opens, and the framework resets the setting itself when the car restarts.
  */
 internal class WifiScanPause(
     context: Context,
@@ -53,39 +51,10 @@ internal class WifiScanPause(
 
     internal companion object {
         internal const val TAG = "DiPlayWifiScan"
-        internal const val HEADER = "DIPLAY_WIFI_SCAN_V1"
-
-        /** app_process start-up on a slow head unit plus the helper's own deadline. */
-        internal const val HELPER_TIMEOUT_MS = 15_000
-
         fun eligible(backend: WirelessHotspotBackend, sdk: Int = Build.VERSION.SDK_INT): Boolean =
-            backend == WirelessHotspotBackend.WIFI_P2P && sdk >= Build.VERSION_CODES.N_MR1
+            backend == WirelessHotspotBackend.WIFI_P2P && sdk == 28
 
         fun restoreIfNeeded(context: Context) = ProcessWifiScanPause.recover(context.applicationContext)
-
-        fun command(apk: String, enabled: Boolean): String {
-            val quoted = "'" + apk.replace("'", "'\"'\"'") + "'"
-            val action = if (enabled) WifiScanPauseMain.RESTORE else WifiScanPauseMain.PAUSE
-            return "CLASSPATH=$quoted app_process /system/bin ${WifiScanPauseMain::class.java.name} $action"
-        }
-
-        /** Reads the helper's protocol line; other output, such as runtime warnings, is ignored. */
-        fun parse(output: String?): WifiScanSwitchResult {
-            val prefix = "$HEADER|"
-            val line = output?.lineSequence()?.map(String::trim)?.lastOrNull { it.startsWith(prefix) }
-                ?: return WifiScanSwitchResult.UNKNOWN
-            return WifiScanSwitchResult.entries.firstOrNull { it.name == line.removePrefix(prefix) }
-                ?: WifiScanSwitchResult.UNKNOWN
-        }
-
-        /** Why the helper did not answer, from what the adb connection reported. */
-        fun unanswered(access: LocalAdb.Access?): WifiScanSwitchResult = when (access) {
-            LocalAdb.Access.NOT_APPROVED -> WifiScanSwitchResult.ADB_NOT_APPROVED
-            LocalAdb.Access.UNREACHABLE -> WifiScanSwitchResult.ADB_OFF
-            LocalAdb.Access.UNSUPPORTED -> WifiScanSwitchResult.ADB_PAIRING_ONLY
-            // Connected, so the helper may have run before the link failed.
-            LocalAdb.Access.READY, null -> WifiScanSwitchResult.UNKNOWN
-        }
     }
 }
 
@@ -101,7 +70,6 @@ private object ProcessWifiScanPause : WifiScanPauseControl {
     private val worker: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor {
         Thread(it, WifiScanPause.TAG).apply { isDaemon = true }
     }
-    private val adb = LocalAdbShell(WifiScanPause.TAG)
     private var session: WifiScanPauseSession? = null
     private var retry: ScheduledFuture<*>? = null
 
@@ -134,7 +102,6 @@ private object ProcessWifiScanPause : WifiScanPauseControl {
             } else {
                 retry?.cancel(false)
                 retry = null
-                adb.close()
             }
         }
     }
@@ -155,7 +122,10 @@ private object ProcessWifiScanPause : WifiScanPauseControl {
     }
 
     private fun switch(app: Context, enabled: Boolean): WifiScanSwitchResult {
-        val output = adb.run(app, WifiScanPause.command(app.packageCodePath, enabled), WifiScanPause.HELPER_TIMEOUT_MS)
-        return if (output == null) WifiScanPause.unanswered(adb.lastAccess) else WifiScanPause.parse(output)
+        if (Build.VERSION.SDK_INT != 28) return WifiScanSwitchResult.UNSUPPORTED
+        if (app.checkSelfPermission("android.permission.CONNECTIVITY_INTERNAL") != PackageManager.PERMISSION_GRANTED)
+            return WifiScanSwitchResult.DENIED
+        val wifi = app.getSystemService(WifiManager::class.java) ?: return WifiScanSwitchResult.UNSUPPORTED
+        return WifiAutojoinSwitch(wifi).set(enabled)
     }
 }

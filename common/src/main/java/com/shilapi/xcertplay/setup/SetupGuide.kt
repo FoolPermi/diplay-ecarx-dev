@@ -15,12 +15,12 @@ object SetupGuide {
     /** TESTED: confirmed on at least one car. HIDDEN: not offered in the guide. */
     enum class Status { TESTED, EXPERIMENTAL, HIDDEN }
 
-    data class Entry(val feature: Feature, val status: Status, val needsAdb: Boolean)
+    data class Entry(val feature: Feature, val status: Status)
 
     /** Claims follow docs/COMPATIBILITY.md: community reports, not a certified support list. */
     fun features(): List<Entry> = listOf(
-        Entry(Feature.AUTO_CONNECT, Status.TESTED, false),
-        Entry(Feature.LOCATION, Status.TESTED, false),
+        Entry(Feature.AUTO_CONNECT, Status.TESTED),
+        Entry(Feature.LOCATION, Status.TESTED),
     )
 
     private fun prefs(context: Context) = context.getSharedPreferences("diplay", Context.MODE_PRIVATE)

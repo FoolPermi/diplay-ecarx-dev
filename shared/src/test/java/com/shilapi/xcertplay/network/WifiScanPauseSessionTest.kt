@@ -20,7 +20,7 @@ class WifiScanPauseSessionTest {
         fun write(value: Boolean): WifiScanSwitchResult {
             assertTrue("Recovery must be durable before any firmware write", journal)
             commands.add(value)
-            if (value && !restoreAvailable) return WifiScanSwitchResult.ADB_OFF
+            if (value && !restoreAvailable) return WifiScanSwitchResult.DENIED
             enabled = value
             return WifiScanSwitchResult.DONE
         }
@@ -123,13 +123,10 @@ class WifiScanPauseSessionTest {
     }
 
     @Test
-    fun missingAdbChangesNothingAndLeavesNoRestoreToRetry() {
+    fun deniedOrUnsupportedControlLeavesNoRestoreToRetry() {
         for (result in listOf(
-            WifiScanSwitchResult.ADB_OFF,
-            WifiScanSwitchResult.ADB_NOT_APPROVED,
-            WifiScanSwitchResult.ADB_PAIRING_ONLY,
-            WifiScanSwitchResult.UNSUPPORTED,
             WifiScanSwitchResult.DENIED,
+            WifiScanSwitchResult.UNSUPPORTED,
         )) {
             val fixture = Fixture()
             val session = fixture.session(fixture.refuse(result))
@@ -146,7 +143,7 @@ class WifiScanPauseSessionTest {
     @Test
     fun refusedPauseNeverDiscardsAnEarlierProcessRestore() {
         val fixture = Fixture().apply { journal = true; enabled = false; restoreAvailable = false }
-        val session = fixture.session(fixture.refuse(WifiScanSwitchResult.ADB_OFF))
+        val session = fixture.session(fixture.refuse(WifiScanSwitchResult.DENIED))
         assertFalse(session.acquire(Any()) { true }.paused)
         assertTrue(fixture.journal)
         assertTrue(session.recoveryPending())

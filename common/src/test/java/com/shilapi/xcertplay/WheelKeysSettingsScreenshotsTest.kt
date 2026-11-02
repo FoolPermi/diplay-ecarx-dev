@@ -94,7 +94,7 @@ class WheelKeysSettingsScreenshotsTest {
         } finally { activity.finish() }
     }
 
-    @Test @Config(sdk = [28]) fun hyBackgroundPermissionActionAppearsOnlyWhenNeeded() {
+    @Test @Config(sdk = [28]) fun hyMissingPlatformPermissionIsExplainedOnlyWhenNeeded() {
         val activity = Robolectric.buildActivity(DiPlayActivity::class.java).get()
         activity.setTheme(android.R.style.Theme_Material_NoActionBar)
         val app = activity.application
@@ -107,7 +107,7 @@ class WheelKeysSettingsScreenshotsTest {
             DiPlayActivity::class.java.getDeclaredMethod("wheelKeysSettings", LinearLayout::class.java)
                 .apply { isAccessible = true }.invoke(activity, row)
             val buttonExists = allViews(row).filterIsInstance<TextView>()
-                .any { it.text == activity.getString(R.string.settings_hy_siri_grant_logs) }
+                .any { it.text == activity.getString(R.string.settings_hy_siri_grant_failed) }
             assertTrue(buttonExists == !granted)
             if (!granted) {
                 row.measure(View.MeasureSpec.makeMeasureSpec(1920, View.MeasureSpec.EXACTLY),

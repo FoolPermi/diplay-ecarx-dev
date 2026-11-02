@@ -159,9 +159,9 @@ class SimplifiedSettingsUiTest {
         })
     }
 
-    @Test @Config(sdk = [28], shadows = [CarHotspotAdbGrantTest.WritePermission::class])
+    @Test @Config(sdk = [28], shadows = [HotspotWritePermissionShadow::class])
     fun carHotspotKeepsReadAndStartTogetherAndModificationUnderMore() {
-        CarHotspotAdbGrantTest.WritePermission.allowed = false
+        HotspotWritePermissionShadow.allowed = false
         AirPlayPersistence.saveWirelessHotspotMode(activity, com.shilapi.xcertplay.orchestration.WirelessHotspotMode.MANUAL)
         AirPlayPersistence.saveManualHotspotSsid(activity, "Lynk 01")
         AirPlayPersistence.saveManualHotspotPassphrase(activity, "private-password")
@@ -203,7 +203,7 @@ class SimplifiedSettingsUiTest {
         val root = LinearLayout(activity)
         ReflectionHelpers.callInstanceMethod<Unit>(activity, "wirelessLinkControls",
             ReflectionHelpers.ClassParameter.from(LinearLayout::class.java, root))
-        assertTrue(hasTitle(root, R.string.settings_car_hotspot_config_title))
+        assertEquals(android.os.Build.VERSION.SDK_INT == 28, hasTitle(root, R.string.settings_car_hotspot_config_title))
         assertTrue(hasTitle(root, R.string.auto_car_hotspot_title))
         assertTrue(hasTitle(root, R.string.settings_manual_hotspot_title))
         assertFalse(views(root).filterIsInstance<TextView>().any { it.text == "自动加入热点（实验性）" })

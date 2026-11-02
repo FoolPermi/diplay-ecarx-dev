@@ -1,16 +1,16 @@
 package com.shilapi.xcertplay
 
+import android.app.AppOpsManager
+import android.content.ComponentName
 import android.content.Context
+import android.content.pm.PackageManager
 import android.provider.Settings
-import com.shilapi.xcertplay.adb.AdbKeys
-import com.shilapi.xcertplay.adb.LocalAdb
-import java.io.Closeable
 import java.util.concurrent.atomic.AtomicBoolean
 
-/** Explicit settings action; connection startup never grants these permissions. */
+/** Explicit setup of this app's permissions using the vehicle's platform grant. */
 internal object UsbPermissionSetup {
-    // Keep wheel-service rebinding and explicit USB setup from overwriting each other's service list.
     internal val accessibilityLock = Any()
+
     enum class Permission {
         ACCESSIBILITY, USAGE, OVERLAY;
 
@@ -22,111 +22,68 @@ internal object UsbPermissionSetup {
                 OVERLAY -> Settings.canDrawOverlays(context)
             }
         }.getOrDefault(false)
+
+        fun apply(context: Context) {
+            if (this == ACCESSIBILITY) {
+                check(enableAccessibility(context, ComponentName(context, UsbAutoConfirmService::class.java)))
+            } else {
+                check(context.checkSelfPermission("android.permission.MANAGE_APP_OPS_MODES") == PackageManager.PERMISSION_GRANTED)
+                val manager = context.getSystemService(AppOpsManager::class.java)
+                AppOpsManager::class.java.getMethod("setMode", String::class.java, Int::class.javaPrimitiveType,
+                    String::class.java, Int::class.javaPrimitiveType).invoke(manager,
+                    if (this == USAGE) AppOpsManager.OPSTR_GET_USAGE_STATS else AppOpsManager.OPSTR_SYSTEM_ALERT_WINDOW,
+                    context.applicationInfo.uid, context.packageName, AppOpsManager.MODE_ALLOWED)
+            }
+        }
     }
 
     fun snapshot(context: Context): Map<Permission, Boolean> = Permission.entries.associateWith { it.granted(context) }
 
-    internal interface Client : Closeable {
-        fun connect(): LocalAdb.Access
-        fun shell(command: String): String?
-        fun cancel()
+    /** Keeps other services and the existing crash-rebind delay; writes are always read back. */
+    internal fun enableAccessibility(context: Context, service: ComponentName,
+        rebind: () -> Boolean = { false }, shouldContinue: () -> Boolean = { true }): Boolean = synchronized(accessibilityLock) {
+        if (context.checkSelfPermission(android.Manifest.permission.WRITE_SECURE_SETTINGS) != PackageManager.PERMISSION_GRANTED ||
+            !shouldContinue()) return@synchronized false
+        runCatching {
+            val resolver = context.contentResolver
+            val current = Settings.Secure.getString(resolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty()
+            val lists = WheelKeyService.allowedServices(current, service.flattenToString()) ?: return@synchronized false
+            lists.first?.let {
+                if (!shouldContinue()) return@synchronized false
+                if (rebind()) {
+                    if (!Settings.Secure.putString(resolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, it)) return@synchronized false
+                    // The observer must see removal before Android clears a crashed binding.
+                    Thread.sleep(1_000)
+                }
+            }
+            if (!shouldContinue() || !Settings.Secure.putString(resolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES, lists.second))
+                return@synchronized false
+            if (!shouldContinue() || !Settings.Secure.putInt(resolver, Settings.Secure.ACCESSIBILITY_ENABLED, 1)) return@synchronized false
+            service.flattenToString() in Settings.Secure.getString(resolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES).orEmpty().split(':') &&
+                Settings.Secure.getInt(resolver, Settings.Secure.ACCESSIBILITY_ENABLED, 0) == 1
+        }.getOrDefault(false)
     }
 
-    private class AdbClient(context: Context) : Client {
-        private val adb = LocalAdb(AdbKeys.load(context))
-        override fun connect() = adb.connect(mayAsk = true)
-        override fun shell(command: String) = synchronized(accessibilityLock) { adb.shell(command) }
-        override fun cancel() = adb.cancelPendingOperations()
-        override fun close() = adb.close()
+    data class Result(val verified: Map<Permission, Boolean>, val failed: Set<Permission> = emptySet()) {
+        val complete: Boolean get() = failed.isEmpty() && verified.size == Permission.entries.size && verified.values.all { it }
     }
 
-    data class Result(
-        val access: LocalAdb.Access,
-        val verified: Map<Permission, Boolean>,
-        val commandsFailed: Set<Permission> = emptySet(),
-    ) {
-        val complete: Boolean get() = access == LocalAdb.Access.READY && commandsFailed.isEmpty() &&
-            verified.size == Permission.entries.size && verified.values.all { it }
-    }
-
-    class Operation(
-        private val context: Context,
-        private val factory: () -> Client = { AdbClient(context) },
-        private val granted: (Permission) -> Boolean = { it.granted(context) },
-    ) {
+    class Operation(private val context: Context,
+        private val apply: (Permission) -> Unit = { it.apply(context) },
+        private val granted: (Permission) -> Boolean = { it.granted(context) }) {
         private val cancelled = AtomicBoolean(false)
-        private val lock = Any()
-        private var client: Client? = null
         val isCancelled: Boolean get() = cancelled.get()
-
-        fun cancel() {
-            cancelled.set(true)
-            // Cancellation closes the socket without waiting for a synchronized ADB read.
-            synchronized(lock) { client }?.cancel()
-        }
+        fun cancel() { cancelled.set(true) }
 
         fun run(): Result {
-            var access = LocalAdb.Access.UNREACHABLE
             val failed = mutableSetOf<Permission>()
-            if (isCancelled) return Result(access, emptyMap())
-            runCatching {
-                factory().use { adb ->
-                    synchronized(lock) {
-                        client = adb
-                        if (isCancelled) adb.cancel()
-                    }
-                    if (isCancelled) return@use
-                    access = adb.connect()
-                    if (access != LocalAdb.Access.READY || isCancelled) return@use
-                    for (permission in Permission.entries) {
-                        if (isCancelled) break
-                        if (granted(permission)) continue
-                        val command = command(permission, context.packageName)
-                        if (isCancelled) break
-                        val output = adb.shell(withExitStatus(command))
-                        if (isCancelled) break
-                        if (output?.lineSequence()?.lastOrNull() != "$EXIT_MARKER:0") failed += permission
-                    }
-                }
-            }.onFailure { failed += Permission.entries }
-            synchronized(lock) { client = null }
-            val verified = if (isCancelled) emptyMap() else Permission.entries.associateWith {
-                runCatching { granted(it) }.getOrDefault(false)
+            for (permission in Permission.entries) {
+                if (isCancelled) break
+                if (granted(permission)) continue
+                runCatching { apply(permission) }.onFailure { failed += permission }
             }
-            return Result(access, verified, failed)
+            val verified = if (isCancelled) emptyMap() else Permission.entries.associateWith { granted(it) }
+            return Result(verified, failed)
         }
-    }
-
-    private const val EXIT_MARKER = "DIPLAY_PERMISSION_EXIT"
-
-    private fun withExitStatus(command: String): String =
-        "( $command ); result=\$?; printf '\\n$EXIT_MARKER:%s\\n' \"\$result\""
-
-    private fun quote(value: String): String = "'" + value.replace("'", "'\\''") + "'"
-
-    /** Read and append in the device shell; neither path replaces the other enabled services. */
-    internal fun command(permission: Permission, packageName: String): String {
-        require(Regex("[A-Za-z0-9_]+(?:\\.[A-Za-z0-9_]+)+").matches(packageName))
-        val pkg = quote(packageName)
-        return when (permission) {
-            Permission.USAGE -> "appops set $pkg GET_USAGE_STATS allow"
-            Permission.OVERLAY -> "appops set $pkg SYSTEM_ALERT_WINDOW allow"
-            Permission.ACCESSIBILITY -> {
-                val service = quote("$packageName/com.shilapi.xcertplay.UsbAutoConfirmService")
-                """current=${'$'}(settings get secure enabled_accessibility_services) || exit 1;
-                    case "${'$'}current" in null|"") current="";; esac;
-                    case "${'$'}current" in *[!a-zA-Z0-9_./:${'$'}]*) exit 1;; esac;
-                    service=$service;
-                    case ":${'$'}current:" in *":${'$'}service:"*) ;; *)
-                        if [ -n "${'$'}current" ]; then current="${'$'}current:${'$'}service"; else current="${'$'}service"; fi;;
-                    esac;
-                    settings put secure enabled_accessibility_services "${'$'}current" &&
-                    settings put secure accessibility_enabled 1""".trimIndent().replace("\n", " ")
-            }
-        }
-    }
-
-    fun manualCommand(packageName: String): String = Permission.entries.joinToString(" && ") {
-        "adb shell ${quote(command(it, packageName))}"
     }
 }

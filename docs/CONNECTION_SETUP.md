@@ -1,5 +1,7 @@
 # Built-in car hotspot setup
 
+Production scope: Android 9 / ECARX 753 / 820A, ARM64 or ARMv7, with the vehicle platform signature. Other devices are debugging environments. See [the permission checklist](ADB_AND_PLATFORM_PERMISSIONS.zh-CN.md).
+
 DiAuto & DiPlay — Built-in car hotspot test builds
 28 September 2026
 
@@ -71,65 +73,10 @@ If the car rejects the channel or creates a different one, DiPlay reports an
 error. Choose Auto or another channel and reconnect. Switching to the built-in
 hotspot preserves this choice without applying it to the car hotspot.
 
-OPTIONAL: DIPLAY BYD FEATURES REQUIRING ADB
-Settings → BYD features · needs ADB appears only when BYD navigation services or
-the factory BYD car settings app are present, and traditional network ADB is
-reachable at 127.0.0.1:5555. The hotspot check also covers older QUALCOMM/qti
-head units without the supported navigation services; it does not enable
-navigation-output features on those units.
-An unapproved ADB key still shows the setup entry; TLS pairing is not supported.
-The initial check never requests approval or reads vehicle data.
+VEHICLE PERMISSIONS
+The Android 9 vehicle build uses system permissions directly for hotspot control, accessibility setup, own-app AppOps, and USB/VPN authorization when the OEM dialog is missing. The app contains no ADB client or debugging-key setup. Missing permissions are reported and do not trigger shell commands.
 
-The BYD ADB section contains battery reporting (with charging connectors and
-low-charge warning), wheel speed for tunnels, video while parked, and the
-dashboard song. These use autoservice through ADB, not the AMap navigation
-receiver. Check ADB access and Apply and reconnect are in this section too.
-The cluster-map stream switch retains its existing display and firmware checks.
-Navigation arrows, HUD, and map-display settings keep their existing capability
-checks in BYD navigation. Saved choices and vehicle-reading behavior are unchanged.
-
-Automatically turn on the car hotspot appears as one switch and description in
-the same section only when Built-in car hotspot is selected. Wi-Fi Direct hides
-it without changing the saved choice or the other BYD ADB options.
-The switch is off by default. Turning it on automatically requests missing
-WRITE_SETTINGS through ADB, without a separate setup button or DiPlay confirmation.
-Approve the car's system ADB prompt if needed. The switch is enabled only after
-the required permissions are verified; a failed grant leaves it off and shows a message.
-After the grant, firmware that allows the app's direct hotspot request can turn
-on the saved hotspot without ADB. Firmware that blocks that request needs an
-already-authorized, reachable traditional network ADB connection at each startup
-or connection attempt. The fallback uses only a saved-hotspot start command
-advertised by that firmware's service help, checks its result, and waits for an
-observed AP enabled state. These commands are not standard Android commands;
-this does not establish support for every DiLink version. If neither path is
-supported, use the car's own hotspot settings.
-Turning ADB off hides this setting but preserves the choice; enable ADB again
-to change it. USB, Wi-Fi Direct,
-disconnecting, exiting, and turning this option off do not stop the hotspot.
-Unsupported firmware, missing permission, and startup failures are reported;
-the car's own hotspot settings remain available for manual setup.
-
-On Android 9/API 28, when the hotspot is off and the radio reports dual-band,
-DiPlay first moves the car's saved hotspot band to 5 GHz, keeping the SSID,
-password and security, so the automatic start comes up on 5 GHz. A hotspot
-that is already running keeps its current band until it is turned off and
-turned on again; DiPlay never restarts it just to change bands. Choosing
-2.4 GHz in the car-hotspot band setting opts out. If the band cannot be read,
-written or verified, DiPlay starts with the car's saved band instead.
-
-For startup after boot, also enable Open after the car starts. When both options
-are selected, the switch being enabled also requests missing SYSTEM_ALERT_WINDOW
-for boot launch. This does not enable a floating map or turn on the boot option
-automatically. The head unit may also require its own auto-start permission.
-Connect when DiPlay opens remains a separate choice: the app can start the hotspot
-without connecting to an iPhone.
-
-OPTIONAL: DIPLAY AUTOMATIC INSTRUMENT MAP
-On the supported DiLink 5.1 firmware, open Settings → BYD navigation →
-Automatic map setup · ADB. Follow the displayed one-time computer setup,
-then tap Check and enable. Open the cluster's map card or select Map theme.
-This permission is for automatic cluster theme/card detection, not hotspot
-connection. The guide explains the exact command for the installed app.
+Automatic hotspot startup is a separate option from opening DiPlay at boot or connecting on app launch. Existing hotspot credentials and active hotspot bands are preserved. Wi-Fi Direct scan control keeps its durable restore record and retries restoration after disconnect or app restart. Both paths need vehicle validation with network debugging disabled.
 
 WHAT TO TEST / REPORT
 Check first connection, reconnect after restarting the app/car, maps,

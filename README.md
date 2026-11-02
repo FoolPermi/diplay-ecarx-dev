@@ -1,5 +1,7 @@
 # DiPlay · 领克 01 CarPlay
 
+正式环境：Android 9（API 28）／753／820A，使用现有平台签名。应用内不使用 ADB，APK 仅含 ARM64／ARMv7；其他 Android 版本仅用于调试。见 [权限清单](docs/ADB_AND_PLATFORM_PERMISSIONS.zh-CN.md)。
+
 [简体中文](README.zh-CN.md) · [繁體中文](README.zh-TW.md) · [English](README.md#english)
 
 DiPlay 让你在领克车机上使用 iPhone 的导航、音乐、Siri 和通话。适配**亿咖通车机 753 版本**（领克高通 820A 平台），当前在 **2021 款领克 01** 上验证；同平台的 753 车机理论上通用。

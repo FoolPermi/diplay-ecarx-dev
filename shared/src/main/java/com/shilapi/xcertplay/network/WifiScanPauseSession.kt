@@ -6,9 +6,6 @@ internal enum class WifiScanSwitchResult(val reason: String, val changedNothing:
 
     /** Pause only: automatic joining was already off, so it is someone else's to restore. */
     ALREADY_OFF("already-off", true),
-    ADB_OFF("adb-off", true),
-    ADB_NOT_APPROVED("adb-not-approved", true),
-    ADB_PAIRING_ONLY("adb-pairing-only", true),
     UNSUPPORTED("unsupported-firmware", true),
 
     /** The framework refused the caller before changing anything. */
@@ -49,7 +46,7 @@ internal class WifiScanPauseSession(
         try {
             val earlierPause = loadJournal()
             if (!earlierPause && !saveJournal(true)) return Outcome(false, JOURNAL_FAILED)
-            // Persist before the write: a lost shell reply or process death may follow a real mutation.
+            // Persist before the write: a lost system reply or process death may follow a real mutation.
             val result = setEnabled(false).also { reply = it }
             // A pause left by an earlier process is still ours; its marker restores it later.
             pauseConfirmed = result == WifiScanSwitchResult.DONE ||

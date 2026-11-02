@@ -80,7 +80,6 @@ import androidx.core.view.doOnPreDraw
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import com.shilapi.xcertplay.adb.LocalAdb
 import com.shilapi.xcertplay.airplay.CarPlayMediaButton
 import com.shilapi.xcertplay.airplay.AirPlayConfig
 import com.shilapi.xcertplay.airplay.AirPlayDisplaySettings
@@ -618,7 +617,7 @@ open class CarPlayHostActivity : ComponentActivity() {
     private var manualHotspotSecurity = ManualHotspotSecurity.OPEN
     private var manualHotspotInterface = ""
     private var awaitingVpnConsent = false
-    private var vpnAdbConsentTried = false
+    private var vpnPlatformConsentTried = false
     private var awaitingWirelessPermissions = false
     private var wirelessPermissionsRefused = false
     private var awaitingWiredPermissions = false
@@ -1142,7 +1141,7 @@ open class CarPlayHostActivity : ComponentActivity() {
         }
         if (consent == null) {
             vpnReady = true
-            // Consent can arrive after the ADB step was shown, from the command run on a computer; the step is done.
+            // Authorization may have changed while the user was in system settings.
             showConnectionHelp(null)
             maybeStartCarPlay()
             return
@@ -1179,32 +1178,32 @@ open class CarPlayHostActivity : ComponentActivity() {
         Log.w(TAG, diagnostic, error)
         appendLog(diagnostic)
         setStatus(R.string.vpn_authorization_unavailable)
-        if (!vpnAdbConsentTried) preConsentVpnOverAdb()
+        if (!vpnPlatformConsentTried) preConsentVpnWithPlatform()
     }
 
-    /** Without a consent dialog, the car's approved adb can allow the VPN instead (#604). */
-    private fun preConsentVpnOverAdb() {
-        vpnAdbConsentTried = true
+    /** Use the platform VPN permission when the OEM consent dialog is missing. */
+    private fun preConsentVpnWithPlatform() {
+        vpnPlatformConsentTried = true
         val app = applicationContext
         Thread({
-            val access = runCatching { VpnPreConsent.grant(app) }.getOrDefault(LocalAdb.Access.UNREACHABLE)
+            val authorized = runCatching { VpnPreConsent.grant(app) }.getOrDefault(false)
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
-                val granted = runCatching { CarPlayVpnService.prepare(this) == null }.getOrDefault(false)
-                appendLog("VPN consent over adb access=$access granted=$granted")
+                val granted = authorized && runCatching { CarPlayVpnService.prepare(this) == null }.getOrDefault(false)
+                appendLog("VPN platform consent authorized=$authorized granted=$granted")
                 if (granted && !awaitingVpnConsent && !vpnReady) {
                     vpnReady = true
                     maybeStartCarPlay()
                 } else if (!granted && !awaitingVpnConsent && !useWirelessTransport) {
-                    setStatus(VpnPreConsent.stage(access))
+                    setStatus(R.string.vpn_authorization_platform_missing)
                     connectionInstructionsView?.visibility = View.GONE
                     connectionHelpView?.apply {
-                        text = getString(R.string.vpn_authorization_adb_command, packageName)
+                        text = getString(R.string.vpn_authorization_platform_missing)
                         visibility = View.VISIBLE
                     }
                 }
             }
-        }, "diplay-vpn-adb-consent").start()
+        }, "diplay-vpn-platform-consent").start()
     }
 
     private fun requestWirelessPermissions() {
@@ -1360,7 +1359,6 @@ open class CarPlayHostActivity : ComponentActivity() {
         }
     }
 
-    private var adbClusterConfigured = false
     // Whether the running session's cluster stream was sized for a physical cluster display.
     private var clusterStreamOnDisplay = false
 
@@ -1577,7 +1575,7 @@ open class CarPlayHostActivity : ComponentActivity() {
 
         // Steering-wheel next/previous, claimed by the CarPlay screen itself. The head unit gives
         // these keys to whichever window is in front, and this is the only route that reaches CarPlay
-        // without the wheel key service — which a head unit with no ADB cannot turn on at all.
+        // without relying on the wheel key accessibility service being connected.
         val mediaPress = CarPlayMediaButton.forCarPlayWindow(
             event.keyCode,
             sessionActive = activeAirPlaySession != null,
@@ -6782,7 +6780,7 @@ open class CarPlayHostActivity : ComponentActivity() {
     // The keywords are English; matching the English text keeps the result the same in every UI language.
     private fun friendlyStage(message: String, englishMessage: String = message): String = when {
         message == getString(R.string.vpn_authorization_unavailable) ||
-            LocalAdb.Access.entries.any { message == getString(VpnPreConsent.stage(it)) } -> message
+            message == getString(R.string.vpn_authorization_platform_missing) -> message
         message == getString(R.string.usb_trust_waiting) ||
             message == getString(R.string.usb_trust_refused) ||
             message == getString(R.string.usb_trust_phone_locked) ||

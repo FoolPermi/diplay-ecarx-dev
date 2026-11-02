@@ -1,4 +1,4 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:tools="http://schemas.android.com/tools" xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!-- Guards the run-time USB permission result receivers on Android 12 and older. -->
     <permission
@@ -12,6 +12,8 @@
     <!-- Lets DiPlay register a self-managed call with Telecom; a normal permission, no prompt. -->
     <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CONNECTIVITY_INTERNAL" android:maxSdkVersion="28" tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.MANAGE_USB" android:maxSdkVersion="28" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission
         android:name="android.permission.NEARBY_WIFI_DEVICES"

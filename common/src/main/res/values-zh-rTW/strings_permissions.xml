@@ -1,0 +1,21 @@
+<resources>
+    <string name="settings_permission_check">權限檢查</string>
+    <string name="settings_permission_refresh">重新整理</string>
+    <string name="settings_permission_uid">應用程式 UID：%1$d</string>
+    <string name="settings_permission_signature">平台簽章</string>
+    <string name="settings_permission_signature_match">相符</string>
+    <string name="settings_permission_signature_mismatch">不符</string>
+    <string name="settings_permission_access">功能存取狀態</string>
+    <string name="settings_permission_manifest">應用程式宣告的權限</string>
+    <string name="settings_permission_granted">已授予</string>
+    <string name="settings_permission_denied">未授予</string>
+    <string name="settings_permission_unavailable">系統未提供</string>
+    <string name="settings_permission_unknown">無法讀取</string>
+    <string name="settings_permission_usage">使用情況存取</string>
+    <string name="settings_permission_overlay">懸浮視窗</string>
+    <string name="settings_permission_usb_service">USB 無障礙授權</string>
+    <string name="settings_permission_wheel_service">方向盤無障礙授權</string>
+    <string name="settings_permission_wheel_connection">方向盤服務</string>
+    <string name="settings_permission_connected">已連線</string>
+    <string name="settings_permission_disconnected">未連線</string>
+</resources>

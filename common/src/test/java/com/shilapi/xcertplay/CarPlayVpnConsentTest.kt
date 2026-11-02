@@ -13,7 +13,6 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
 import androidx.core.app.ActivityOptionsCompat
-import com.shilapi.xcertplay.adb.LocalAdb
 import com.shilapi.xcertplay.host.R
 import java.io.File
 import java.lang.reflect.InvocationTargetException
@@ -34,7 +33,7 @@ import org.robolectric.annotation.LooperMode
 import org.robolectric.util.ReflectionHelpers
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [25, 29], qualifiers = "en-w1920dp-h1080dp-land-mdpi", shadows = [VpnConsentTestShadow::class, VpnPreConsentTestShadow::class])
+@Config(sdk = [28], qualifiers = "en-w1920dp-h1080dp-land-mdpi", shadows = [VpnConsentTestShadow::class, VpnPreConsentTestShadow::class])
 @LooperMode(LooperMode.Mode.PAUSED)
 class CarPlayVpnConsentTest {
     private lateinit var activity: CarPlayHostActivity
@@ -47,7 +46,6 @@ class CarPlayVpnConsentTest {
         VpnConsentTestShadow.consent = Intent().setClassName(
             "com.android.vpndialogs", "com.android.vpndialogs.ConfirmDialog",
         )
-        VpnPreConsentTestShadow.access = LocalAdb.Access.UNREACHABLE
         VpnPreConsentTestShadow.allowsVpn = false
         CarPlayBackgroundSession.clear()
         activity = Robolectric.buildActivity(CarPlayHostActivity::class.java).get()
@@ -61,7 +59,7 @@ class CarPlayVpnConsentTest {
     }
 
     @After fun tearDown() {
-        awaitAdbConsent()
+        awaitPlatformConsent()
         ReflectionHelpers.getField<AtomicBoolean>(activity, "shuttingDown").set(true)
         ReflectionHelpers.getField<Handler>(activity, "mainHandler").removeCallbacksAndMessages(null)
         ReflectionHelpers.getField<ExecutorService>(activity, "teardownExecutor").shutdownNow()
@@ -145,46 +143,31 @@ class CarPlayVpnConsentTest {
         assertFalse(field("awaitingVpnConsent"))
     }
 
-    @Test fun withoutAConsentScreenOrNetworkAdbTheScreenGivesTheAdbCommand() {
-        consentScreenMissingThenAdb(LocalAdb.Access.UNREACHABLE)
-        assertAdbStep(R.string.vpn_authorization_adb_unusable)
-        assertTrue(log().contains("VPN consent over adb access=UNREACHABLE granted=false"))
+    @Test fun aMissingPlatformGrantExplainsTheInstallationRequirement() {
+        consentScreenMissing(false)
+        assertEquals(activity.getString(R.string.vpn_authorization_platform_missing), stage())
+        assertEquals(View.GONE, instructions.visibility)
+        assertEquals(View.VISIBLE, help.visibility)
+        assertFalse(help.text.contains("adb", ignoreCase = true))
+        assertFalse(field("vpnReady"))
+        assertTrue(log().contains("VPN platform consent authorized=false granted=false"))
     }
 
-    @Test fun pairingOnlyAdbIsNamedLikeAdbThatDoesNotAnswer() {
-        consentScreenMissingThenAdb(LocalAdb.Access.UNSUPPORTED)
-        assertAdbStep(R.string.vpn_authorization_adb_unusable)
+    @Test @Config(qualifiers = "zh-rTW") fun thePlatformFailureIsTranslated() {
+        consentScreenMissing(false)
+        assertEquals(activity.getString(R.string.vpn_authorization_platform_missing), stage())
     }
 
-    @Test fun adbThatHasNotApprovedDiPlayIsNamed() {
-        consentScreenMissingThenAdb(LocalAdb.Access.NOT_APPROVED)
-        assertAdbStep(R.string.vpn_authorization_adb_not_approved)
-    }
-
-    @Test @Config(qualifiers = "zh-rTW") fun theCauseStaysNamedOutsideEnglish() {
-        consentScreenMissingThenAdb(LocalAdb.Access.NOT_APPROVED)
-        assertAdbStep(R.string.vpn_authorization_adb_not_approved)
-    }
-
-    @Test fun adbThatRanWithoutAllowingTheVpnSaysSo() {
-        consentScreenMissingThenAdb(LocalAdb.Access.READY)
-        assertAdbStep(R.string.vpn_authorization_adb_did_not_allow)
-        assertTrue(log().contains("VPN consent over adb access=READY granted=false"))
-    }
-
-    @Test fun consentAllowedOverAdbContinuesWithoutAStep() {
-        consentScreenMissingThenAdb(LocalAdb.Access.READY, allowsVpn = true)
+    @Test fun platformAuthorizationContinuesWithoutAConsentScreen() {
+        consentScreenMissing(true)
         assertTrue(field("vpnReady"))
         assertEquals(View.VISIBLE, instructions.visibility)
         assertEquals(View.GONE, help.visibility)
-        assertNotEquals(activity.getString(R.string.vpn_authorization_adb_did_not_allow), stage())
-        assertTrue(log().contains("VPN consent over adb access=READY granted=true"))
+        assertTrue(log().contains("VPN platform consent authorized=true granted=true"))
     }
 
-    @Test fun theStepGoesOnceTheNextAttemptHasConsent() {
-        consentScreenMissingThenAdb(LocalAdb.Access.UNREACHABLE)
-        assertEquals(View.VISIBLE, help.visibility)
-        // The command was run from a computer, then the iPhone plugged in again.
+    @Test fun theHelpDisappearsWhenTheNextAttemptHasConsent() {
+        consentScreenMissing(false)
         VpnConsentTestShadow.consent = null
         invoke("requestVpnConsent")
         assertTrue(field("vpnReady"))
@@ -192,27 +175,16 @@ class CarPlayVpnConsentTest {
         assertEquals(View.GONE, help.visibility)
     }
 
-    private fun consentScreenMissingThenAdb(access: LocalAdb.Access, allowsVpn: Boolean = false) {
-        VpnPreConsentTestShadow.access = access
-        VpnPreConsentTestShadow.allowsVpn = allowsVpn
+    private fun consentScreenMissing(allowed: Boolean) {
+        VpnPreConsentTestShadow.allowsVpn = allowed
         replaceLauncher { throw ActivityNotFoundException("Missing OEM VPN dialog") }
         invoke("requestVpnConsent")
-        awaitAdbConsent()
+        awaitPlatformConsent()
         shadowOf(Looper.getMainLooper()).idle()
     }
 
-    private fun awaitAdbConsent() = Thread.getAllStackTraces().keys
-        .filter { it.name == "diplay-vpn-adb-consent" }.forEach { it.join(3_000) }
-
-    private fun assertAdbStep(@StringRes cause: Int) {
-        assertEquals(activity.getString(cause), stage())
-        assertEquals(View.GONE, instructions.visibility)
-        assertEquals(View.VISIBLE, help.visibility)
-        assertTrue(help.text.toString(),
-            help.text.endsWith("\nadb shell appops set ${activity.packageName} ACTIVATE_VPN allow"))
-        assertFalse(field("vpnReady"))
-        assertEquals(1, log().lines().count { it.contains("VPN consent over adb") })
-    }
+    private fun awaitPlatformConsent() = Thread.getAllStackTraces().keys
+        .filter { it.name == "diplay-vpn-platform-consent" }.forEach { it.join(3_000) }
 
     private fun stage() = ReflectionHelpers.getField<TextView>(activity, "stageStatusView").text.toString()
 
@@ -258,16 +230,12 @@ class VpnConsentTestShadow {
     }
 }
 
-/** The car's adb as [VpnPreConsent] finds it; with [allowsVpn], its appops call gives the consent. */
+/** Platform consent is independent of the OEM dialog and never needs a shell. */
 @Implements(VpnPreConsent::class, isInAndroidSdk = false)
 class VpnPreConsentTestShadow {
-    @Implementation fun grant(context: Context, adb: LocalAdb): LocalAdb.Access {
-        if (access == LocalAdb.Access.READY && allowsVpn) VpnConsentTestShadow.consent = null
-        return access
+    @Implementation fun grant(context: Context): Boolean {
+        if (allowsVpn) VpnConsentTestShadow.consent = null
+        return allowsVpn
     }
-
-    companion object {
-        @Volatile var access = LocalAdb.Access.UNREACHABLE
-        @Volatile var allowsVpn = false
-    }
+    companion object { @Volatile var allowsVpn = false }
 }

@@ -1,0 +1,21 @@
+<resources>
+    <string name="settings_permission_check">Permission check</string>
+    <string name="settings_permission_refresh">Refresh</string>
+    <string name="settings_permission_uid">App UID: %1$d</string>
+    <string name="settings_permission_signature">Platform signature</string>
+    <string name="settings_permission_signature_match">Matches</string>
+    <string name="settings_permission_signature_mismatch">Does not match</string>
+    <string name="settings_permission_access">Feature access</string>
+    <string name="settings_permission_manifest">Permissions declared by this app</string>
+    <string name="settings_permission_granted">Granted</string>
+    <string name="settings_permission_denied">Not granted</string>
+    <string name="settings_permission_unavailable">Not provided by this system</string>
+    <string name="settings_permission_unknown">Unavailable</string>
+    <string name="settings_permission_usage">Usage Access</string>
+    <string name="settings_permission_overlay">Display over other apps</string>
+    <string name="settings_permission_usb_service">USB accessibility authorization</string>
+    <string name="settings_permission_wheel_service">Wheel key accessibility authorization</string>
+    <string name="settings_permission_wheel_connection">Wheel key service</string>
+    <string name="settings_permission_connected">Connected</string>
+    <string name="settings_permission_disconnected">Not connected</string>
+</resources>

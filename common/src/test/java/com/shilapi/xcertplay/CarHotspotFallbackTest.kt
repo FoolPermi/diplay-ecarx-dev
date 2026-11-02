@@ -37,13 +37,13 @@ import org.robolectric.annotation.Implements
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [29], manifest = Config.NONE, shadows = [CarHotspotFallbackTest.ApState::class,
     CarHotspotFallbackTest.ManualAttachment::class, CarHotspotFallbackTest.ExistingAttachment::class,
-    CarHotspotAdbGrantTest.WritePermission::class])
+    HotspotWritePermissionShadow::class])
 class CarHotspotFallbackTest {
     private val app get() = RuntimeEnvironment.getApplication()
 
     @Before fun setUp() {
         CarHotspotSettings.setEnabled(app, true)
-        CarHotspotAdbGrantTest.WritePermission.allowed = true
+        HotspotWritePermissionShadow.allowed = true
         ApState.enabled = null
         ManualAttachment.starts = 0
     }
@@ -59,7 +59,7 @@ class CarHotspotFallbackTest {
 
     @Test fun enabledHotspotStillAttachesWithoutControlPermission() {
         ApState.enabled = true
-        CarHotspotAdbGrantTest.WritePermission.allowed = false
+        HotspotWritePermissionShadow.allowed = false
         controller().use { assertEquals(WirelessHotspotBackend.MANUAL_HOTSPOT, start(it).backend) }
         assertEquals(1, ManualAttachment.starts)
     }
@@ -74,7 +74,7 @@ class CarHotspotFallbackTest {
 
     @Test fun missingControlPermissionIsStillReported() {
         ApState.enabled = false
-        CarHotspotAdbGrantTest.WritePermission.allowed = false
+        HotspotWritePermissionShadow.allowed = false
         assertStartupFailure("Hotspot control permission is missing")
     }
 
@@ -84,7 +84,7 @@ class CarHotspotFallbackTest {
 
     @Test fun existingWifiBypassesHotspotControlEvenWithAutoStartupSavedAndApOff() {
         ApState.enabled = false
-        CarHotspotAdbGrantTest.WritePermission.allowed = false
+        HotspotWritePermissionShadow.allowed = false
         controller(WirelessHotspotMode.EXISTING_WIFI).use {
             assertEquals(WirelessHotspotBackend.EXISTING_WIFI, start(it).backend)
         }
