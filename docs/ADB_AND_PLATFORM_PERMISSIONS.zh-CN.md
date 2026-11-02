@@ -105,7 +105,13 @@ BOOT_COMPLETED → BootReceiver 读取设置 → 请求打开 DiPlay
 
 主机检查与 APK 内容核对结果记录在 issue #21；不把 Robolectric 或编译通过当成真机系统服务已授权。权限界面的 1920×1080 [自动化测试截图](screenshots/12-permission-check-android9-test.png)用于核对布局，其中 UID、签名和授权值属于测试环境。
 
-本轮验证包括仓库规定的 shared／common／home 单元测试、mobile／home／maphost／siribridge 的 Lint 与 Debug 构建；同时静态检查 APK ABI、新增权限声明和 ADB 客户端缺失。未安装到实车，未制作新的平台签名发布包。
+本轮验证包括仓库规定的 shared／common／home 单元测试、mobile／home／maphost／siribridge 的 Lint 与 Debug 构建；同时静态检查 APK ABI、新增权限声明和 ADB 客户端缺失。实车安装与重启验收待进行。按用户要求，rebase 后只补跑 4 个测试类共 13 项，全部通过，未重复全量单测。
+
+PR [#23](https://github.com/jianyun8023/diplay-ecarx/pull/23) 提交后，已从源码 `d18a1b58` 构建 **v114 Release**（`0.2-car-test-noadb-v114`，包名 `com.shihab.diplay`）。Release Lint、Android 9 验签、zipalign、ARM ABI、五项 API 28 权限声明及 ADB 客户端缺失检查通过，签名与认证输入均与 v113 一致。
+
+- APK：`DiPlay-noadb-release-v114.apk`，17,909,257 字节；比本地 v113 小 218,522 字节，该整体变化不只来自 ABI 删除。
+- SHA-256：`b22580ca8252cc226ddba0e82951bb1130e0bd45f46fcf0a3f99f05067c01d96`。
+- 本地工作区产物、源码 ZIP 和验证记录：`artifacts/issue21-v114/`；签名与认证资产未进入源码归档。
 
 待实车验收（安装本车平台签名的新包后，关闭网络调试；不先用电脑授权）：
 
