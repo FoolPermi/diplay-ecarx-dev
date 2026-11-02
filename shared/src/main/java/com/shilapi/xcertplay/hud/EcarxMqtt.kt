@@ -76,7 +76,7 @@ internal object EcarxMqtt {
         return frame(0x32, body.toByteArray())
     }
 
-    private fun frame(type: Int, body: ByteArray): ByteArray {
+    internal fun frame(type: Int, body: ByteArray): ByteArray {
         val out = ByteArrayOutputStream()
         out.write(type)
         var remaining = body.size
@@ -90,7 +90,7 @@ internal object EcarxMqtt {
         return out.toByteArray()
     }
 
-    private fun mqttString(out: ByteArrayOutputStream, value: String) {
+    internal fun mqttString(out: ByteArrayOutputStream, value: String) {
         val bytes = value.toByteArray(Charsets.UTF_8)
         out.write((bytes.size ushr 8) and 0xFF)
         out.write(bytes.size and 0xFF)
@@ -98,7 +98,7 @@ internal object EcarxMqtt {
     }
 
     /** Reads one control packet: its first byte (type in the high nibble) and its body. */
-    fun readPacket(input: InputStream): Pair<Int, ByteArray>? {
+    fun readPacket(input: InputStream, maxBytes: Int = Int.MAX_VALUE): Pair<Int, ByteArray>? {
         val first = input.read()
         if (first < 0) return null
         var multiplier = 1
@@ -107,9 +107,10 @@ internal object EcarxMqtt {
             val digit = input.read()
             if (digit < 0) return null
             length += (digit and 0x7F) * multiplier
+            if (length > maxBytes) return null
             if (digit and 0x80 == 0) break
             multiplier *= 128
-            if (multiplier > 128 * 128 * 128) return null
+            if (multiplier >= 128 * 128 * 128) return null
         }
         val body = ByteArray(length)
         var read = 0

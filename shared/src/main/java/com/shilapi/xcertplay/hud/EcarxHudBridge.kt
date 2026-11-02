@@ -599,10 +599,10 @@ internal object EcarxHudBridge {
         pushLaneLocked(force = true)
         reassertCount++
         val state = "map=$presentationWanted phase=${phase.name.lowercase()} ongoing=${outcome(active)} lanes=${lastLanePushed?.size ?: 0}"
-        if (state != lastReassertOutcome) {
-            lastReassertOutcome = state
-            NavigationOutputs.diagnostic("route=$routeNumber reassert $state")
-        }
+        lastReassertOutcome = state
+        val pushed = lastPushed
+        NavigationOutputs.diagnostic("route=$routeNumber reassert $state arrowId=${pushed?.turnId} " +
+            "nextMeters=${pushed?.distanceToNextMeters} roadPresent=${!pushed?.nextGuidancePointName.isNullOrEmpty()}")
     }
 
     // ---------------------------------------------------------------- push path
