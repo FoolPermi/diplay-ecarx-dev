@@ -383,7 +383,8 @@ class CarPlayController(
             wiredSessionActive = true
             wiredStartWatchdog?.sessionActive()
             if (currentCornerMask?.session !== session) currentCornerMask = null
-            val replacement = activeSession !== session
+            val previousSession = activeSession
+            val replacement = previousSession !== session
             if (replacement) {
                 NavigationOutputs.start(appContext)
                 com.shilapi.xcertplay.glance.CarPlayGlance.setConnected(true)
@@ -394,7 +395,7 @@ class CarPlayController(
                 }
             }
             activeSession = session
-            NavigationOutputs.onSessionActive(debugLogs = { uiListener?.debugLogsEnabled == true }, requestExit = ::requestNavigationExit) { !closed && activeSession === session && !session.isClosed }
+            NavigationOutputs.onSessionActive(debugLogs = { uiListener?.debugLogsEnabled == true }, requestExit = ::requestNavigationExit, newSession = replacement, replacePrevious = previousSession != null && replacement) { !closed && activeSession === session && !session.isClosed }
             clusterOutputStateListener?.invoke()
             if (replacement) restoreDashboardContent(session)
             debugLog(
@@ -402,6 +403,10 @@ class CarPlayController(
                     "peer=${session.host}",
             )
             uiListener?.onSessionActive(session)
+        }
+
+        override fun onClusterControlReady(session: AirPlaySession) {
+            if (!closed && activeSession === session && !session.isClosed) clusterOutputStateListener?.invoke()
         }
 
         override fun onSessionEnded(session: AirPlaySession) {
@@ -666,9 +671,9 @@ class CarPlayController(
 
     /** Release the phone's secondary navigation view when the physical cluster is hidden. */
     fun setClusterOutputVisible(visible: Boolean) {
-        if (closed) return
+        val session = activeAirPlaySession() ?: return
         try {
-            touchExecutor.execute { if (!closed) applyClusterUi(visible) }
+            touchExecutor.execute { if (!closed && activeSession === session && !session.isClosed) applyClusterUi(visible) }
         } catch (_: java.util.concurrent.RejectedExecutionException) {
             // Closing the controller also closes the phone session.
         }
@@ -708,14 +713,19 @@ class CarPlayController(
     }
 
     /** Queues navigation arbitration on the command worker; route metadata confirms completion. */
-    fun requestNavigationExit(): Boolean {
-        val session = activeAirPlaySession() ?: return false
+    fun requestNavigationExit(requestId: Long? = null): Boolean {
+        val session = activeAirPlaySession() ?: run {
+            if (requestId != null) NavigationOutputs.diagnostic("exit claim written=false reason=no-session", requestId)
+            return false
+        }
         return try {
             touchExecutor.execute {
-                if (!closed && activeSession === session) session.requestNavigationExit()
+                if (!closed && activeSession === session) session.requestNavigationExit(requestId)
+                else if (requestId != null) NavigationOutputs.diagnostic("exit claim written=false reason=session-replaced", requestId)
             }
             true
         } catch (_: java.util.concurrent.RejectedExecutionException) {
+            if (requestId != null) NavigationOutputs.diagnostic("exit claim written=false reason=queue-rejected", requestId)
             false
         }
     }
@@ -1919,6 +1929,11 @@ class CarPlayController(
                 // Keep wirelessActiveReported false until maybeCompleteWirelessHandoff() closes
                 // the Bluetooth bootstrap after the tunneled iAP2 channel is ready.
                 sessionListener.onSessionActive(session)
+            }
+
+            override fun onClusterControlReady(session: AirPlaySession) {
+                if (isStaleWirelessRun(generation)) return
+                sessionListener.onClusterControlReady(session)
             }
 
             override fun onSessionEnded(session: AirPlaySession) {

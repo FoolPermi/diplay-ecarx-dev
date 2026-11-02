@@ -1,6 +1,7 @@
 package com.shilapi.xcertplay.airplay
 
 import android.util.Log
+import com.shilapi.xcertplay.hud.NavigationOutputs
 import com.shilapi.xcertplay.mfi.MfiAuthenticator
 import com.shilapi.xcertplay.transport.BlockingDuplexByteStream
 import java.io.BufferedInputStream
@@ -30,6 +31,7 @@ interface AirPlaySessionListener {
     fun onSessionConnecting(session: AirPlaySession) {}
     fun onSessionActive(session: AirPlaySession) {}
     fun onSessionEnded(session: AirPlaySession) {}
+    fun onClusterControlReady(session: AirPlaySession) {}
     fun onVideoFrameRendered(session: AirPlaySession) {}
     /** Validated downstream; immutable copy of iPhone's top-left grayscale coverage PNG. */
     fun onCornerMask(session: AirPlaySession, png: ByteArray, displayWidth: Int) {}
@@ -130,6 +132,8 @@ class AirPlaySession(
         Thread(task, "carplay-navigation-exit").apply { isDaemon = true }
     }
     private var navigationExitPending = false
+    private var navigationExitRequestId: Long? = null
+    private var navigationExitLastEntity: Int? = null
     private var navigationExitTimeout: java.util.concurrent.ScheduledFuture<*>? = null
     private val eventThreads = CopyOnWriteArrayList<Thread>()
 
@@ -171,6 +175,7 @@ class AirPlaySession(
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
+        releaseNavigationExit("session-closed")
         navigationExitTimer.shutdownNow()
         mainScreenToken = null
         clearClusterContent()
@@ -417,9 +422,17 @@ class AirPlaySession(
      * TurnByTurn arbitration requests that the phone yield navigation, then releases our claim.
      * Only the phone's subsequent route metadata can confirm that its route actually ended.
      */
-    fun requestNavigationExit(): Boolean = synchronized(eventWriteLock) {
-        if (closed.get()) return false
-        if (navigationExitPending) return true
+    fun requestNavigationExit(requestId: Long? = null): Boolean = synchronized(eventWriteLock) {
+        if (closed.get()) {
+            if (requestId != null) NavigationOutputs.diagnostic("exit claim written=false reason=session-closed", requestId)
+            return false
+        }
+        if (navigationExitPending) {
+            if (requestId != null) NavigationOutputs.diagnostic("exit claim coalesced withRequest=$navigationExitRequestId", requestId)
+            return true
+        }
+        navigationExitRequestId = requestId
+        navigationExitLastEntity = null
         navigationExitPending = true
         val sent = sendCommandLocked(mapOf("type" to "changeModes", "params" to mapOf(
             "appStates" to listOf(mapOf("appStateID" to 3, "state" to true)),
@@ -427,6 +440,7 @@ class AirPlaySession(
         )))
         navigationExitPending = sent
         Log.i(TAG, "navigation exit claim written=$sent")
+        if (requestId != null) NavigationOutputs.diagnostic("exit claim written=$sent", requestId)
         if (sent) navigationExitTimeout = navigationExitTimer.schedule(
             { releaseNavigationExit("timeout") }, 5, java.util.concurrent.TimeUnit.SECONDS)
         sent
@@ -441,6 +455,7 @@ class AirPlaySession(
             "reasonStr" to "Navigation exit arbitration complete",
         )))
         Log.i(TAG, "navigation exit release reason=$reason written=$sent routeEndUnconfirmed=true")
+        navigationExitRequestId?.let { NavigationOutputs.diagnostic("exit release reason=$reason written=$sent", it) }
     }
 
     fun sendIapMessage(data: ByteArray, timeoutMillis: Long = 0L): Boolean {
@@ -692,6 +707,7 @@ class AirPlaySession(
             Log.w(TAG, "airplay SETUP response callback failed", error)
         }
         reapplyClusterContent()
+        listener.onClusterControlReady(this)
     }
 
     private fun debugLog(message: String, uiVisible: Boolean = true) {
@@ -843,7 +859,13 @@ class AirPlaySession(
             val entity = (navigation?.get("entity") as? Number)?.toInt()
             if (entity != null) {
                 Log.i(TAG, "navigation mode entity=$entity")
-                if (entity == 2) releaseNavigationExit("accessory-granted")
+                synchronized(eventWriteLock) {
+                    if (entity != navigationExitLastEntity) {
+                        navigationExitLastEntity = entity
+                        navigationExitRequestId?.let { NavigationOutputs.diagnostic("exit modesChanged entity=$entity", it) }
+                    }
+                    if (entity == 2) releaseNavigationExit("accessory-granted")
+                }
             }
         }
         when (type) {
@@ -980,6 +1002,7 @@ class AirPlaySession(
             val videoDelivery = videoPlaybackAvailability.setEventReady(true)
             debugLog("airplay video event ready availability=$videoDelivery")
             reapplyClusterContent()
+            listener.onClusterControlReady(this)
             runEventRead(socket)
         } catch (error: Exception) {
             if (!closed.get()) {

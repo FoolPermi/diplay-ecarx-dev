@@ -321,13 +321,35 @@ class EcarxLaneGuidanceFlowTest {
 
     @Test fun unknownPlatformPolicyUsesDefaultIntentButWaitsForRouteAndSurface() {
         context.getSharedPreferences("diplay_ecarx_outputs_v2", Context.MODE_PRIVATE).edit().clear().commit()
+        NavigationOutputs.attachReport { reports += it }
+        NavigationOutputs.debugLogsEnabled = { false }
         initialize()
         assertFalse(NavigationOutputs.requestPresentation(context, true, "early surface"))
         assertTrue(calls("setPresentationToDimSwitch").isEmpty())
         maneuver(); guidance()
         assertTrue(panelRequests.last())
         assertTrue(calls("setPresentationToDimSwitch").isEmpty())
-        assertTrue(NavigationOutputs.requestPresentation(context, true, "ready surface"))
+        send(0x5204) {
+            u16(0, 42); u16(1, 0); group(2) { u16(0, 0); u8(1, 2); i16(2, 90) }
+        }
+        val lane = calls("updateLaneInfo").last().payload["lanes"] as List<*>
+        assertEquals(1, lane.size)
+        guidance(distance = 345) // No video frame or platform option has arrived.
+        assertEquals(345, calls("updateDistanceToNextGuidancePoint").last().payload["meters"])
+        assertEquals(lane, calls("updateLaneInfo").last().payload["lanes"])
+        assertTrue(calls("setPresentationToDimSwitch").isEmpty())
+        assertTrue(NavigationOutputs.requestPresentation(context, true, "independent map first frame"))
+        assertTrue(reports.any { "sdkSwitch=true platformOption=unknown result=ok" in it })
+        DimInteraction.instance().callback.onShowPresentationOptionChanged(3)
+        shadowOf(Looper.getMainLooper()).idle()
+        assertTrue(NavigationOutputs.requestPresentation(context, false, "surface detached"))
+        DimInteraction.instance().callback.onShowPresentationOptionChanged(2)
+        shadowOf(Looper.getMainLooper()).idle()
+        assertTrue(NavigationOutputs.requestPresentation(context, true, "replacement surface"))
+        val option = reports.indexOfLast { "map option=2 " in it }
+        assertTrue(option >= 0)
+        assertTrue(reports.indexOfLast { "sdkSwitch=true platformOption=2 result=ok" in it } > option)
+        assertTrue(calls("notifyTurnByTurnStopped").isEmpty())
     }
 
     @Test fun aHiddenChoiceSurvivesReconnectionButColdStartRestoresTheDefault() {
@@ -591,6 +613,88 @@ class EcarxLaneGuidanceFlowTest {
         assertNull(calls("updateLaneInfo").last().payload["lanes"])
     }
 
+    @Test fun missingTurnAcrossTickAndMapSwitchKeepsOwnershipAndAcceptsCurrentLane() {
+        installFactoryNavigation(); initialize()
+        for (switchFirst in listOf(false, true)) {
+            maneuver(); guidance()
+            send(0x5201) { u16List(0x0d, listOf(8)); u16(0x10, 2); u8(0x12, 1) }
+            if (!switchFirst) tick()
+            NavigationOutputs.requestPresentation(context, false, "hidden during gap")
+            send(0x5204) {
+                u16(0, 42); u16(1, 2); group(2) { u16(0, 0); u8(1, 2); i16(2, -90) }
+            }
+            assertTrue("ownership lost during gap", EcarxHudBridge.isActive())
+            assertEquals(PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER,
+                context.packageManager.getApplicationEnabledSetting(FACTORY_PACKAGE))
+            assertTrue(NavigationOutputs.requestPresentation(context, true, "replacement during gap"))
+            assertEquals("ongoingNavi", DimInteraction.navi.navigationEvents.last())
+            val lane = calls("updateLaneInfo").last().payload["lanes"] as List<*>
+            assertEquals(16, (lane.single() as Map<*, *>)["iconId"])
+            assertEquals(0, calls("notifyTurnByTurnStopped").size)
+            maneuver(index = 8)
+            send(0x5201) { u32(0x0a, 150) }
+            assertEquals(150, calls("updateDistanceToNextGuidancePoint").last().payload["meters"])
+            assertEquals(1, calls("notifyTurnByTurnStarted").size)
+            send(0x5201) { u8(1, 0) }
+            assertFactoryRestored()
+            FixtureLog.reset()
+        }
+    }
+
+    @Test fun fallbackLaneRequiresFreshContentsAfterTheTurnChanges() {
+        initialize(); maneuver(); guidance()
+        fun lane(angle: Int) = send(0x5204) {
+            u16(0, 42); u16(1, 0); group(2) { u16(0, 0); u8(1, 2); i16(2, angle) }
+        }
+        lane(-90)
+        assertNotNull(calls("updateLaneInfo").last().payload["lanes"])
+        send(0x5201) { u16List(0x0d, listOf(8)); u32(0x0a, 121) }
+        maneuver(index = 8)
+        lane(-90)
+        assertNull(calls("updateLaneInfo").last().payload["lanes"])
+        lane(90)
+        assertNotNull(calls("updateLaneInfo").last().payload["lanes"])
+    }
+
+    @Test fun destinationFollowsItsOwnFieldAndDebugOffReportContainsOnlyTransitions() {
+        NavigationOutputs.attachReport { reports += it }
+        NavigationOutputs.debugLogsEnabled = { false }
+        initialize()
+        send(0x5201) { u8(1, 1); string(4, "private-end") }
+        assertFalse(EcarxHudBridge.isActive())
+        assertTrue(calls("updateAddresses").isEmpty())
+        maneuver(road = "private-street"); guidance()
+        assertEquals("private-end", DimInteraction.navi.destinationName)
+        val writes = calls("updateAddresses").size
+        guidance(distance = 349)
+        assertEquals(writes, calls("updateAddresses").size)
+        send(0x5201) { string(4, "private-new-end") }
+        assertEquals("private-new-end", DimInteraction.navi.destinationName)
+        send(0x5201) { string(4, "未知位置") }
+        assertEquals("", DimInteraction.navi.destinationName)
+        send(0x5201) { string(4, "private-new-end") }
+        send(0x5201) { u8(1, 0); string(4, "ignored") }
+        assertEquals("", DimInteraction.navi.destinationName)
+        assertEquals("naviAppOff", DimInteraction.navi.navigationEvents.last())
+        assertTrue(reports.any { "phase=waiting" in it })
+        assertTrue(reports.any { "firstTurnMs=" in it && "phase=guiding" in it })
+        assertTrue(reports.none { "private-" in it })
+        maneuver(); guidance()
+        assertEquals("", DimInteraction.navi.destinationName)
+    }
+
+    @Test fun unknownOrQuietStartupCannotClaimDimAndUnmeasuredTurnCannotPublishZero() {
+        initialize()
+        for (state in listOf(3, 6, 99)) send(0x5201) { u8(1, state) }
+        maneuver()
+        assertFalse(EcarxHudBridge.isActive())
+        send(0x5201) { u8(1, 1); u16List(0x0d, listOf(7)) }
+        assertTrue(calls("updateNavigationInfo").isEmpty())
+        send(0x5201) { u32(0x0a, 0) }
+        assertTrue(EcarxHudBridge.isActive())
+        assertEquals(0L, calls("updateNavigationInfo").last().payload["getDistanceToNextGuidancePoint"])
+    }
+
     @Test fun repeatedMapDeliveryRestoresTheFinalEventAndLiveLaneData() {
         initialize(); maneuver(); guidance()
         send(0x5204) {
@@ -761,7 +865,8 @@ class EcarxLaneGuidanceFlowTest {
         send(0x5201) { u16List(0x0d, emptyList()) }
         nowNs += 3_000_000_000L
         tick()
-        assertTrue(reports.last { it.startsWith("DIM guidance ended") }.contains("reason=empty-list-timeout"))
+        assertTrue(EcarxHudBridge.isActive())
+        assertTrue(route.diagnosticState().contains("reason=empty-list-timeout"))
         assertTrue(route.diagnosticState().contains("emptyAgeMs=3000"))
         assertFalse(route.diagnosticState().contains("滨海路"))
 
@@ -774,7 +879,7 @@ class EcarxLaneGuidanceFlowTest {
         assertTrue(reports.last { it.startsWith("DIM guidance ended") }.contains("reason=no-route"))
         maneuver(); guidance()
         send(0x5201) { u8(1, 2) }
-        assertTrue(reports.last { it.startsWith("DIM guidance ended") }.contains("reason=arrived"))
+        assertTrue(reports.last { it.startsWith("DIM guidance ended") }.contains("reason=arrivedCandidate"))
     }
 
     @Test fun quietRouteKeepsItsPanelAndFactoryOwnershipOnlyWhileCurrentSessionIsLive() {
@@ -808,19 +913,19 @@ class EcarxLaneGuidanceFlowTest {
         NavigationOutputs.start(context)
         NavigationOutputs.onSessionActive { true }
         awaitOutputWorker()
-        for (end in listOf("no-route", "arrived", "empty-list-timeout", "disconnect")) {
+        for (end in listOf("no-route", "arrived", "disconnect")) {
             maneuver(); guidance()
             nowNs += 31_000_000_000L
             tick()
             assertTrue(EcarxHudBridge.isActive())
+            send(0x5201) { u16List(0x0d, emptyList()) }
+            nowNs += 3_000_000_000L
+            tick()
+            assertTrue(EcarxHudBridge.isActive())
+            assertTrue(panelRequests.last())
             when (end) {
                 "no-route" -> send(0x5201) { u8(1, 0) }
                 "arrived" -> send(0x5201) { u8(1, 2) }
-                "empty-list-timeout" -> {
-                    send(0x5201) { u16List(0x0d, emptyList()) }
-                    nowNs += 3_000_000_000L
-                    tick()
-                }
                 else -> {
                     NavigationOutputs.endNow()
                     awaitOutputWorker()
@@ -878,7 +983,7 @@ class EcarxLaneGuidanceFlowTest {
         assertEquals(6, reports.count { it.startsWith("DIM lifecycle") && it.contains("method not found") })
     }
 
-    @Test fun optionalHyStatusFollowsAggregateBeforeLifecycleAndDoesNotRepeatOnKeepalive() {
+    @Test fun sdkStartAndEndAreDistinctFromSnapshotAndDoNotRepeatOnKeepalive() {
         initialize()
         set("navi", EcarxDimApi.NaviHandle(NaviWithStatus()))
         maneuver(); guidance()
@@ -886,12 +991,12 @@ class EcarxLaneGuidanceFlowTest {
         assertTrue(names().indexOf("notifyNavigationStatus") < names().indexOf("notifyTurnByTurnStarted"))
         repeat(10) { tick() }
         guidance(distance = 300)
-        assertEquals(listOf(1), calls("notifyNavigationStatus").map { it.payload["status"] })
+        assertEquals(listOf(2), calls("notifyNavigationStatus").map { it.payload["status"] })
         send(0x5201) { u8(1, 0) }
         assertTrue(names().lastIndexOf("updateNavigationInfo") < names().lastIndexOf("notifyNavigationStatus"))
         assertTrue(names().lastIndexOf("notifyNavigationStatus") < names().lastIndexOf("notifyTurnByTurnStopped"))
         maneuver(); guidance()
-        assertEquals(listOf(1, 0, 1), calls("notifyNavigationStatus").map { it.payload["status"] })
+        assertEquals(listOf(2, 3, 2), calls("notifyNavigationStatus").map { it.payload["status"] })
         assertEquals(listOf(false), calls("setPresentationToDimSwitch").map { it.payload["show"] })
     }
 
@@ -983,8 +1088,9 @@ class EcarxLaneGuidanceFlowTest {
         send(0x5201) { u16List(0x0d, emptyList()) }
         nowNs += 3_000_000_000L
         tick()
-        assertEquals(listOf(true, false, true, false), DimInteraction.navi.ongoingTransitions)
-        assertTrue(reports.last { it.startsWith("DIM guidance ended") }.contains("reason=empty-list-timeout"))
+        assertEquals(listOf(true, false, true), DimInteraction.navi.ongoingTransitions)
+        assertTrue(EcarxHudBridge.isActive())
+        assertTrue(route.diagnosticState().contains("reason=empty-list-timeout"))
     }
 
     @Test fun lifecycleReportsSeparateNotificationFailureFromIdleStateFailure() {
@@ -1018,8 +1124,7 @@ class EcarxLaneGuidanceFlowTest {
         assertTrue(calls("updateLaneInfo").isEmpty())
         FixtureLog.reset()
         send(0x5201) { u8(1, 2) }
-        assertEquals(listOf("updateLaneInfo"), names())
-        assertNull(calls("updateLaneInfo").single().payload["lanes"])
+        assertTrue("Unowned prefetch must not clear the factory display", names().isEmpty())
         assertTrue(panelRequests.isEmpty())
     }
 
@@ -1034,6 +1139,51 @@ class EcarxLaneGuidanceFlowTest {
         repeat(5) { tick() }
         assertEquals(2, calls("updateLaneInfo").size)
         assertEquals(18, ((calls("updateLaneInfo").last().payload["lanes"] as List<*>).single() as Map<*, *>)["iconId"])
+    }
+
+    @Test fun replacingSessionClearsOldOutputAndCachesBeforeInstallingNewProbe() {
+        var sessionA = true
+        var sessionB = true
+        NavigationOutputs.start(context)
+        awaitOutputWorker() // Let the DIM main-thread acquisition finish before exercising A/B.
+        NavigationOutputs.onFrame(Iap2Messages.buildRaw(0x5202) { u16(1, 7); u8(3, 2); string(4, "old road") })
+        NavigationOutputs.onFrame(Iap2Messages.buildRaw(0x5201) {
+            u8(1, 1); u16List(0x0d, listOf(7)); u32(0x0a, 100); string(4, "old destination")
+        })
+        NavigationOutputs.onSessionActive { sessionA }
+        awaitOutputWorker()
+        assertTrue(EcarxHudBridge.isActive()) // Frames before the first session remain valid.
+        assertEquals("old destination", route.destinationName)
+        val starts = calls("notifyTurnByTurnStarted").size
+        NavigationOutputs.onSessionActive(newSession = false) { sessionA }
+        awaitOutputWorker()
+        assertTrue(EcarxHudBridge.isActive())
+        assertEquals(starts, calls("notifyTurnByTurnStarted").size)
+        assertTrue(calls("notifyTurnByTurnStopped").isEmpty())
+
+        sessionA = false
+        NavigationOutputs.onSessionActive(replacePrevious = true) { sessionB }
+        awaitOutputWorker()
+        assertFalse(EcarxHudBridge.isActive())
+        assertNull(field("lastPushed").get(EcarxHudBridge))
+        assertEquals("", route.destinationName)
+        assertEquals(1, calls("notifyTurnByTurnStopped").size)
+        assertFalse(panelRequests.last())
+        assertTrue(route.diagnosticState().contains("sessionActive=true"))
+
+        NavigationOutputs.onFrame(Iap2Messages.buildRaw(0x5201) {
+            u8(1, 1); u16List(0x0d, listOf(7)); u32(0x0a, 200)
+        })
+        awaitOutputWorker()
+        assertFalse(EcarxHudBridge.isActive()) // A's maneuver cannot revive B's route.
+        NavigationOutputs.onFrame(Iap2Messages.buildRaw(0x5202) { u16(1, 7); u8(3, 3) })
+        awaitOutputWorker()
+        assertTrue(EcarxHudBridge.isActive())
+        assertEquals(starts + 1, calls("notifyTurnByTurnStarted").size)
+        sessionB = false
+        nowNs += 90_000_000_000L
+        tick()
+        assertFalse(EcarxHudBridge.isActive())
     }
 
     private fun hex(value: String): ByteArray =

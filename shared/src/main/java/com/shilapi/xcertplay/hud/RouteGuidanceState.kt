@@ -48,11 +48,24 @@ internal class RouteGuidanceState(
 
     private val maneuvers = mutableMapOf<Int, Maneuver>()
     private var routeActive = false
-    private var activeIndex = -1
+    var activeIndex = -1
+        private set
+    var announced = false
+        private set
+    var inputState: Int? = null
+        private set
+    var lastPhoneState: Int? = null
+        private set
+    private var lastPhoneStateNs: Long? = null
+    val phoneStateAgeMs get() = lastPhoneStateNs?.let { (nanoTime() - it) / 1_000_000 }
+    val expired get() = lastRouteUpdateNs?.let { nanoTime() - it >= staleRouteNs && !liveSession() } == true
+    var destinationName = ""
+        private set
     var laneGuidanceIndex: Int? = null
         private set
     var laneGuidanceShowing: Boolean? = null
         private set
+    private var distanceKnown = false
     private var distanceMeters = 0
     private var currentRoad = ""
     private var arrivalEpochSeconds: Long? = null
@@ -66,6 +79,7 @@ internal class RouteGuidanceState(
         private set
 
     fun accept(messageId: Int, payload: ByteArray): RouteGuidanceChange {
+        inputState = null
         if (!validTlvs(payload)) {
             diagnosticInput = "invalid-tlv bytes=${payload.size}"
             return RouteGuidanceChange.NONE
@@ -86,14 +100,20 @@ internal class RouteGuidanceState(
         )
     }
 
+    /** The DIM snapshot requires a real next-turn distance; other consumers retain their fallback. */
+    fun currentForDim(): AppleManeuver? = if (distanceKnown) current() else null
+
     fun clear(reason: String = "clear"): Boolean {
         val wasActive = routeActive
         endReason = reason
         routeActive = false
+        announced = false
+        destinationName = ""
         activeIndex = -1
         laneGuidanceIndex = null
         laneGuidanceShowing = null
         distanceMeters = 0
+        distanceKnown = false
         currentRoad = ""
         arrivalEpochSeconds = null
         etaRawSeconds = null
@@ -154,6 +174,7 @@ internal class RouteGuidanceState(
             when {
                 type == 0x01 && valueLength >= 1 -> state = data[value].toInt() and 0xff
                 type == 0x03 -> currentRoad = utf8(data, value, valueLength)
+                type == 0x04 -> destinationName = utf8(data, value, valueLength).takeUnless { it == "未知位置" }.orEmpty()
                 // Apple's 0x05 is not always an absolute timestamp: this phone sends the time
                 // *remaining*. Handing that straight to the head unit made it render a 41-minute
                 // remainder as the clock time "24:41", because it formats whatever integer it
@@ -180,13 +201,19 @@ internal class RouteGuidanceState(
             }
         }
 
+        inputState = state
+        if (state != null) {
+            lastPhoneState = state
+            lastPhoneStateNs = lastRouteUpdateNs
+            if (state == 1) announced = true
+        }
         diagnosticInput = "state=${state ?: "absent"} next=${distance ?: "absent"} " +
             "list=${if (!listPresent) "absent" else firstManeuver?.toString() ?: "empty"}"
 
         // Only NoRouteSet (0) and Arrived (2) end the route. A wireless handoff often sends
         // NoRouteSet while the session is still coming back — keep the overlay instruction then.
         if (state == 0 || state == 2) {
-            return if (clear(if (state == 0) "no-route" else "arrived")) RouteGuidanceChange.CLEAR else RouteGuidanceChange.NONE
+            return if (clear(if (state == 0) "no-route" else "arrivedCandidate")) RouteGuidanceChange.CLEAR else RouteGuidanceChange.NONE
         }
         // The iPhone briefly sends an empty current list every few seconds and while rerouting. Keep the last
         // maneuver (and the cached 0x5202 details, which are never resent) and hide it only if the list stays
@@ -198,10 +225,14 @@ internal class RouteGuidanceState(
         if (firstManeuver != null) emptyListSinceNs = null
         if (state != null) routeActive = true
         if (firstManeuver != null) {
+            if (activeIndex >= 0 && activeIndex != firstManeuver) distanceKnown = false
             activeIndex = firstManeuver!!
             routeActive = true
         }
-        if (distance != null) distanceMeters = distance!!.coerceAtLeast(0)
+        if (distance != null) {
+            distanceKnown = true
+            distanceMeters = distance!!.coerceAtLeast(0)
+        }
         return if (current() != null) RouteGuidanceChange.GUIDANCE else RouteGuidanceChange.NONE
     }
 

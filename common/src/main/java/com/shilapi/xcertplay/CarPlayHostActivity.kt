@@ -5502,7 +5502,7 @@ open class CarPlayHostActivity : ComponentActivity() {
                 finish()
             }
         }
-        CarPlayBackgroundSession.bindClusterOutput(applicationContext, snapshot.controller, HudReportSink(sessionLog))
+        CarPlayBackgroundSession.bindClusterOutput(applicationContext, snapshot.controller)
         callPopupSessionReady = CarPlayBackgroundSession.callPopupReady
         if (snapshot.width > 0 && snapshot.height > 0) {
             activeDisplaySize = DisplaySize(snapshot.width, snapshot.height)
@@ -5656,7 +5656,7 @@ open class CarPlayHostActivity : ComponentActivity() {
                 finish()
             }
         }
-        CarPlayBackgroundSession.bindClusterOutput(applicationContext, next, HudReportSink(sessionLog))
+        CarPlayBackgroundSession.bindClusterOutput(applicationContext, next)
         try {
             ContextCompat.startForegroundService(this, Intent(this, DiPlaySessionService::class.java))
             next.start()
@@ -7140,11 +7140,11 @@ internal object CarPlayBackgroundSession {
     }
 
     @Synchronized
-    fun bindClusterOutput(context: Context, expected: CarPlayController, report: (String) -> Unit) {
+    fun bindClusterOutput(context: Context, expected: CarPlayController) {
         if (controller !== expected) return
-        clusterOutput?.let { it.attachReport(report); return }
+        if (clusterOutput != null) return
         if (!com.shilapi.xcertplay.hud.EcarxCapabilities.detect(context).identified) return
-        clusterOutput = EcarxClusterSession(context.applicationContext, expected, sink ?: return, report)
+        clusterOutput = EcarxClusterSession(context.applicationContext, expected, sink ?: return)
     }
 
     @Synchronized

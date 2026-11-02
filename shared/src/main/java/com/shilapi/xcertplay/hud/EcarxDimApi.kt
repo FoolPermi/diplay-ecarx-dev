@@ -25,6 +25,10 @@ internal object EcarxDimApi {
 
     const val DEFAULT_SCREEN_ID = 1
 
+    // Snapshot values differ from notifyNavigationStatus's START=2 / END=3 lifecycle events.
+    const val NAVIGATION_SNAPSHOT_ACTIVE = INaviInteraction.NAVIGATION_STATUS_SUCCEED
+    const val NAVIGATION_SNAPSHOT_IDLE = INaviInteraction.NAVIGATION_STATUS_UNNAVI
+
     data class EcarxResult(val ok: Boolean, val reason: String) {
         companion object {
             fun ok(what: String) = EcarxResult(true, what)
@@ -36,7 +40,7 @@ internal object EcarxDimApi {
     class DimHandle internal constructor(internal val api: DimInteraction)
     class NaviHandle internal constructor(internal val api: INaviInteraction)
 
-    /** One navigation frame in ECARX vocabulary. `-1` means "this field has no new value". */
+    /** Snapshot status uses ACTIVE=1 / IDLE=0; omitted numeric fields are submitted as zero. */
     data class Guidance(
         val turnId: Int = 0,
         val distanceToNextMeters: Long = -1,
@@ -89,7 +93,7 @@ internal object EcarxDimApi {
     fun registerNavigationInteractionCallback(navi: NaviHandle, label: String, onAction: ((Int) -> Unit)? = null): Any? = runCatching {
         val callback = object : INaviInteraction.INavigationInteractionCallback {
             override fun onDoInteractionAction(action: Int, address: INaviInteraction.IAddress?) {
-                report("callback navi.$label onDoInteractionAction([$action, $address])")
+                report("callback navi.$label onDoInteractionAction(action=$action hasAddress=${address != null})")
                 onAction?.invoke(action)
             }
 
@@ -160,8 +164,21 @@ internal object EcarxDimApi {
         navi.api.updateETA(epochSeconds.toInt())
     }
 
-    fun updateNextGuidancePointName(navi: NaviHandle, name: String): EcarxResult = dispatch("updateNextGuidancePointName(\"$name\")") {
+    fun updateNextGuidancePointName(navi: NaviHandle, name: String): EcarxResult = dispatch("updateNextGuidancePointName") {
         navi.api.updateNextGuidancePointName(name)
+    }
+
+    /** The 753 type-3 implementation reads only the first name; this is not a selectable address. */
+    fun updateDestinationName(navi: NaviHandle, name: String): EcarxResult = dispatch("updateDestinationName(${if (name.isEmpty()) "clear" else "present"})") {
+        val addresses = if (name.isEmpty()) emptyList() else listOf(object : INaviInteraction.IAddress {
+            override fun getAddressName() = name
+            override fun getCityName() = ""
+            override fun getFullAddress() = ""
+            override fun getDistance() = -1L
+            override fun getLatitude() = Double.NaN
+            override fun getLongitude() = Double.NaN
+        })
+        navi.api.updateAddresses(INaviInteraction.TYPE_DESTINATION, addresses)
     }
 
     fun updateLaneInfo(navi: NaviHandle, lanes: List<Lane>): EcarxResult = dispatch("updateLaneInfo(${lanes.size})") {
@@ -180,6 +197,10 @@ internal object EcarxDimApi {
     fun notifyTurnByTurnStarted(navi: NaviHandle): EcarxResult = dispatch("notifyTurnByTurnStarted") { navi.api.notifyTurnByTurnStarted() }
 
     fun notifyTurnByTurnStopped(navi: NaviHandle): EcarxResult = dispatch("notifyTurnByTurnStopped") { navi.api.notifyTurnByTurnStopped() }
+
+    fun notifyNavigationStarted(navi: NaviHandle): EcarxResult = notifyNavigationStatus(navi, INaviInteraction.NAVIGATION_STATUS_START)
+
+    fun notifyNavigationEnded(navi: NaviHandle): EcarxResult = notifyNavigationStatus(navi, INaviInteraction.NAVIGATION_STATUS_END)
 
     /** This firmware re-sends ongoing navigation even when the mute value is unchanged. */
     fun updateMuteState(navi: NaviHandle, state: Int): EcarxResult = dispatch("updateMuteState($state)") {

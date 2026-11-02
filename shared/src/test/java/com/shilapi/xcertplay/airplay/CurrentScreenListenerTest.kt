@@ -1,5 +1,6 @@
 package com.shilapi.xcertplay.airplay
 
+import com.shilapi.xcertplay.hud.NavigationOutputs
 import java.io.Closeable
 import java.net.Socket
 import java.util.Collections
@@ -195,6 +196,52 @@ class CurrentScreenListenerTest {
         } finally {
             engine.onSessionClosed(session)
             session.close()
+        }
+    }
+
+    @Test fun clusterDecoderDiagnosticsOnlyReportCurrentStreamAndStructuredData() {
+        val reports = mutableListOf<String>()
+        NavigationOutputs.attachReport { reports += it }
+        val diagnostics = mutableMapOf<Int, (String) -> Unit>()
+        val sink = object : MediaSink {
+            override fun setVideoDiagnosticHandler(type: Int, handler: (String) -> Unit) {
+                diagnostics[type] = handler
+            }
+        }
+        val engine = CarPlayMediaEngine(sink)
+        val old = testSession()
+        val current = testSession()
+        val format = "output format requested=1600x600 coded=1600x608 crop=0,0,1599,599 " +
+            "stride=1600 slice=608 color=null/null/null"
+        try {
+            withSharedSecret(old)
+            withSharedSecret(current)
+            engine.onScreen(old, 111, mapOf("streamConnectionID" to 1L))
+            val oldCallback = diagnostics.getValue(111)
+            engine.onScreen(current, 111, mapOf("streamConnectionID" to 2L))
+            val currentCallback = diagnostics.getValue(111)
+            engine.onScreen(current, 110, mapOf("streamConnectionID" to 3L))
+            reports.clear()
+            oldCallback(format)
+            oldCallback("first frame rendered")
+            diagnostics.getValue(110)(format)
+            diagnostics.getValue(110)("first frame rendered")
+            currentCallback("first frame rendered private-road")
+            assertTrue(reports.isEmpty())
+            currentCallback("$format private-road")
+            currentCallback("first frame rendered")
+            assertEquals(2, reports.size)
+            assertTrue(reports[0].contains("stream=111 decoderFormat requested=1600x600 coded=1600x608 crop=0,0,1599,599"))
+            assertTrue(reports[1].contains("stream=111 decoderFirstFrame=submitted"))
+            assertTrue(reports.none { it.contains("private-road") })
+            engine.onTeardown(current, 111)
+            currentCallback("first frame rendered")
+            assertEquals(2, reports.size)
+        } finally {
+            engine.onSessionClosed(old)
+            engine.onSessionClosed(current)
+            old.close()
+            current.close()
         }
     }
 

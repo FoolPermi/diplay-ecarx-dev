@@ -3,6 +3,11 @@ package com.shilapi.xcertplay.orchestration
 import com.shilapi.xcertplay.airplay.*
 import com.shilapi.xcertplay.transport.Iap2IdentificationConfig
 import java.net.Socket
+import java.io.ByteArrayOutputStream
+import java.io.OutputStream
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.TimeUnit
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -39,6 +44,11 @@ class CarPlayControllerFirstFrameTest {
             } else controller.javaClass.getDeclaredField("sessionListener")
                 .apply { isAccessible = true }.get(controller) as AirPlaySessionListener
             try {
+                listener.onClusterControlReady(stale)
+                assertEquals(0, updates)
+                listener.onClusterControlReady(active)
+                assertEquals(1, updates)
+                updates = 0
                 listener.onVideoFrameRendered(stale)
                 assertEquals(0, updates)
                 listener.onVideoFrameRendered(active)
@@ -54,6 +64,91 @@ class CarPlayControllerFirstFrameTest {
                 stale.close(); active.close(); controller.close()
                 assertTrue(controller.awaitClosed(2_000))
             }
+        }
+    }
+
+    @Test fun clusterReadyRechecksOwnerIntentAfterSetupAndEventBecomeReady() {
+        val controller = controller(mutableListOf())
+        val listener = controller.javaClass.getDeclaredField("sessionListener")
+            .apply { isAccessible = true }.get(controller) as AirPlaySessionListener
+        val active = AirPlaySession(Socket(), AirPlayConfig("test", "test", "", "1", AirPlayDisplayConfig(800, 480),
+            cluster = AirPlayDisplayConfig(1600, 600, initialUrl = CarPlayClusterDisplay.MAP_URL)),
+            AirPlayIdentity.generate(), PairingStore(), null, listener,
+            object : AirPlayMediaHandler { override fun onScreen(session: AirPlaySession, type: Int, stream: Map<String, Any?>) = 1 })
+        val field = controller.javaClass.getDeclaredField("activeSession").apply { isAccessible = true }
+        val executor = controller.javaClass.getDeclaredField("touchExecutor").apply { isAccessible = true }
+            .get(controller) as ExecutorService
+        fun await() { executor.submit {}.get(3, TimeUnit.SECONDS) }
+        val bytes = ByteArrayOutputStream()
+        val socket = object : Socket() {
+            override fun getOutputStream(): OutputStream = bytes
+        }
+        fun ready() {
+            active.javaClass.getDeclaredMethod("notifySetupResponseSent").apply { isAccessible = true }.invoke(active)
+            await()
+        }
+        try {
+            field.set(controller, active)
+            var wanted = true
+            controller.setClusterOutputStateListener { controller.setClusterOutputVisible(wanted) }
+            await()
+            active.javaClass.getDeclaredMethod("handleStreams", List::class.java).apply { isAccessible = true }
+                .invoke(active, listOf(mapOf("type" to 111L)))
+            ready() // Initial URL is already shown; do not send showUI.
+            assertEquals(0, bytes.size())
+            active.javaClass.getDeclaredField("eventSocket").apply { isAccessible = true }.set(active, socket)
+            active.javaClass.getDeclaredField("eventCipher").apply { isAccessible = true }
+                .set(active, ControlCipher(ByteArray(32), ByteArray(32)))
+            wanted = false
+            controller.setClusterOutputVisible(false)
+            await()
+            active.javaClass.getDeclaredField("eventSocket").apply { isAccessible = true }.set(active, null)
+            wanted = true
+            controller.setClusterOutputVisible(true) // Failed while the event channel was absent.
+            await()
+            active.javaClass.getDeclaredField("eventSocket").apply { isAccessible = true }.set(active, socket)
+            ready()
+            val plain = ControlCipher(ByteArray(32), ByteArray(32)).decrypt(bytes.toByteArray()).data
+            val commands = RtspMessage.parseMessages(plain).messages.map { (BplistCodec.decode(it.body) as Map<*, *>)["type"] }
+            assertEquals(listOf("stopUI", "showUI", "forceKeyFrame"), commands)
+        } finally {
+            active.close(); controller.close()
+            assertTrue(controller.awaitClosed(2_000))
+        }
+    }
+
+    @Test fun queuedOldSessionVisibilityCannotStopItsReplacement() {
+        val controller = controller(mutableListOf())
+        val old = session()
+        val next = AirPlaySession(Socket(), AirPlayConfig("test", "test", "", "1", AirPlayDisplayConfig(800, 480),
+            cluster = AirPlayDisplayConfig(1600, 600, initialUrl = CarPlayClusterDisplay.MAP_URL)),
+            AirPlayIdentity.generate(), PairingStore(), null, object : AirPlaySessionListener {},
+            object : AirPlayMediaHandler { override fun onScreen(session: AirPlaySession, type: Int, stream: Map<String, Any?>) = 1 })
+        val field = controller.javaClass.getDeclaredField("activeSession").apply { isAccessible = true }
+        val executor = controller.javaClass.getDeclaredField("touchExecutor").apply { isAccessible = true }
+            .get(controller) as ExecutorService
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val bytes = ByteArrayOutputStream()
+        try {
+            next.javaClass.getDeclaredMethod("handleStreams", List::class.java).apply { isAccessible = true }
+                .invoke(next, listOf(mapOf("type" to 111L)))
+            next.javaClass.getDeclaredField("eventSocket").apply { isAccessible = true }.set(next,
+                object : Socket() { override fun getOutputStream(): OutputStream = bytes })
+            next.javaClass.getDeclaredField("eventCipher").apply { isAccessible = true }
+                .set(next, ControlCipher(ByteArray(32), ByteArray(32)))
+            field.set(controller, old)
+            executor.execute { entered.countDown(); release.await(3, TimeUnit.SECONDS) }
+            assertTrue(entered.await(3, TimeUnit.SECONDS))
+            controller.setClusterOutputVisible(false)
+            field.set(controller, next)
+            release.countDown()
+            executor.submit {}.get(3, TimeUnit.SECONDS)
+            assertEquals(0, bytes.size())
+        } finally {
+            release.countDown()
+            old.close(); next.close(); controller.close()
+            assertTrue(controller.awaitClosed(2_000))
         }
     }
 

@@ -10,11 +10,11 @@ internal class NavigationOutputWorker(name: String, private val clearOutput: () 
         ArrayBlockingQueue<Runnable>(128), { task -> Thread(task, name).apply { isDaemon = true } })
     private var accepting = false
 
-    @Synchronized fun start(initialize: () -> Unit) {
+    @Synchronized fun start(clear: () -> Unit = clearOutput, initialize: () -> Unit) {
         if (accepting) return
         accepting = true
         executor.queue.clear()
-        executor.execute { runCatching { clearOutput(); initialize() } }
+        executor.execute { runCatching { clear(); initialize() } }
     }
 
     @Synchronized fun submit(action: () -> Unit) {
@@ -28,9 +28,9 @@ internal class NavigationOutputWorker(name: String, private val clearOutput: () 
         }
     }
 
-    @Synchronized fun clear() {
+    @Synchronized fun clear(clear: () -> Unit = clearOutput) {
         accepting = false
         executor.queue.clear()
-        executor.execute { runCatching(clearOutput) }
+        executor.execute { runCatching(clear) }
     }
 }

@@ -1,6 +1,7 @@
 package com.shilapi.xcertplay.airplay
 
 import android.util.Log
+import com.shilapi.xcertplay.hud.NavigationOutputs
 import com.shilapi.xcertplay.transport.BlockingDuplexByteStream
 import java.io.Closeable
 import java.io.File
@@ -87,6 +88,7 @@ class CarPlayMediaEngine(
     )
 
     private val streams = ConcurrentHashMap<StreamKey, Closeable>()
+    private val clusterVideoOwner = AtomicReference<ScreenStream?>()
     private val audioMeta = ConcurrentHashMap<StreamKey, AudioMeta>()
     private val pendingMicrophone = ConcurrentHashMap<StreamKey, MicrophoneConfig>()
     private val audioCaptures = ConcurrentHashMap<StreamKey, AudioPacketCapture>()
@@ -141,6 +143,19 @@ class CarPlayMediaEngine(
             if (type == STREAM_TYPE_MAIN_SCREEN && streams[streamKey] === screen && it == "first frame rendered") {
                 session.videoFrameRendered()
             }
+            if (type == STREAM_TYPE_ALT_SCREEN && !session.isClosed &&
+                streams[streamKey] === screen && clusterVideoOwner.get() === screen) {
+                if (it == "first frame rendered") {
+                    NavigationOutputs.diagnostic("cluster video stream=111 decoderFirstFrame=submitted")
+                } else {
+                    val format = CLUSTER_OUTPUT_FORMAT.find(it)
+                    if (format != null) {
+                        val (requestedWidth, requestedHeight, codedWidth, codedHeight, left, top, right, bottom) = format.destructured
+                        NavigationOutputs.diagnostic("cluster video stream=111 decoderFormat requested=${requestedWidth}x$requestedHeight " +
+                            "coded=${codedWidth}x$codedHeight crop=$left,$top,$right,$bottom")
+                    }
+                }
+            }
             session.logDebug("Video: $it")
         }
         sink.setVideoRecoveryHandler(type) {
@@ -162,6 +177,7 @@ class CarPlayMediaEngine(
                         TAG,
                         "screen stream ended type=$type reason=${cause?.message ?: "peer EOF"}",
                     )
+                    clusterVideoOwner.compareAndSet(screen, null)
                     if (streams.remove(streamKey, screen)) {
                         sink.onScreenStreamActive(type, false)
                     }
@@ -170,6 +186,7 @@ class CarPlayMediaEngine(
             },
         )
         streams.put(streamKey, screen)?.close()
+        if (type == STREAM_TYPE_ALT_SCREEN) clusterVideoOwner.set(screen)
         sink.onScreenStreamActive(type, true)
         return port
     }
@@ -538,7 +555,9 @@ class CarPlayMediaEngine(
             // BufferedAudioStream owns serialized sink cleanup; stopping it first from here
             // could interleave with its in-flight delivery and recreate a stale renderer.
             if (key.type != BufferedAudioStream.STREAM_TYPE) sink.onAudioStopped(streamId)
-            streams.remove(key)?.close()
+            val removed = streams.remove(key)
+            if (type == STREAM_TYPE_ALT_SCREEN && removed is ScreenStream) clusterVideoOwner.compareAndSet(removed, null)
+            removed?.close()
         }
         if (isScreenStreamType(type)) sink.onScreenStreamActive(type, false)
     }
@@ -560,7 +579,11 @@ class CarPlayMediaEngine(
         sessionStreams
             .filter { isScreenStreamType(it.type) }
             .forEach { sink.onScreenStreamActive(it.type, false) }
-        sessionStreams.forEach { streams.remove(it)?.close() }
+        sessionStreams.forEach {
+            val removed = streams.remove(it)
+            if (it.type == STREAM_TYPE_ALT_SCREEN && removed is ScreenStream) clusterVideoOwner.compareAndSet(removed, null)
+            removed?.close()
+        }
         audioMeta.clear()
         pendingMicrophone.clear()
         audioCaptures.values.forEach(AudioPacketCapture::close)
@@ -696,6 +719,11 @@ class CarPlayMediaEngine(
             else -> false
         }
 
+        private val CLUSTER_OUTPUT_FORMAT = Regex(
+            "^output format requested=(\\d{1,5})x(\\d{1,5}) " +
+                "coded=(null|-?\\d{1,10})x(null|-?\\d{1,10}) " +
+                "crop=(null|-?\\d{1,10}),(null|-?\\d{1,10}),(null|-?\\d{1,10}),(null|-?\\d{1,10})(?= |$)",
+        )
         private const val TAG = "xcertplay-usb"
         private const val MICROPHONE_SCHEDULER_IDLE_SECONDS = 5L
         private const val STREAM_TYPE_MAIN_SCREEN = 110
