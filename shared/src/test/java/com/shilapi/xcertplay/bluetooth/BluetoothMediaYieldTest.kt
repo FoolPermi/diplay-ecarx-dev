@@ -4,6 +4,9 @@ import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothProfile
 import android.content.Context
+import android.content.ContextWrapper
+import android.content.Intent
+import android.content.SharedPreferences
 import android.os.Looper
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.ScheduledExecutorService
@@ -81,6 +84,14 @@ class BluetoothMediaYieldTest {
         awaitWorker()
     }
 
+    private fun connectionChanged(device: BluetoothDevice, state: Int) {
+        sink.states[device] = state
+        context.sendBroadcast(Intent("android.bluetooth.a2dp-sink.profile.action.CONNECTION_STATE_CHANGED")
+            .putExtra(BluetoothDevice.EXTRA_DEVICE, device).putExtra(BluetoothProfile.EXTRA_STATE, state))
+        shadowOf(Looper.getMainLooper()).idle()
+        awaitWorker()
+    }
+
     @Test fun onlySelectedMediaProfileChangesAndExactOriginalPolicyReturns() {
         sink.states[other] = BluetoothProfile.STATE_DISCONNECTED
         sink.beforeWrite = {
@@ -150,6 +161,56 @@ class BluetoothMediaYieldTest {
         sink.states[phone] = BluetoothProfile.STATE_CONNECTING
         start()
         assertTrue(sink.writes.isEmpty())
+        assertFalse(prefs.getBoolean("applied", false))
+    }
+
+    @Test fun connectingAtActivationYieldsWhenSelectedPhoneBecomesConnected() {
+        sink.states[phone] = BluetoothProfile.STATE_CONNECTING
+        start()
+        CarBluetoothProfileGuard.yieldNow()
+        awaitWorker()
+        assertTrue(sink.writes.isEmpty())
+
+        connectionChanged(phone, BluetoothProfile.STATE_CONNECTED)
+        assertEquals(listOf(phone to 0), sink.writes)
+        assertEquals(listOf(phone), sink.disconnects)
+        assertEquals(BluetoothProfile.STATE_DISCONNECTED, sink.getConnectionState(phone))
+        restore()
+        assertEquals(100, sink.getPriority(phone))
+        assertEquals(listOf(phone), sink.connects)
+        assertTrue(SinkAdapter.requests.all { it == 11 })
+        assertEquals(0, SinkAdapter.powerChanges)
+    }
+
+    @Test fun selectedPhoneReconnectingAfterYieldIsDisconnectedAgain() {
+        start()
+        connectionChanged(phone, BluetoothProfile.STATE_CONNECTED)
+        assertEquals(listOf(phone, phone), sink.disconnects)
+        assertEquals(BluetoothProfile.STATE_DISCONNECTED, sink.getConnectionState(phone))
+        assertEquals(100, prefs.getInt("media_original_policy", -1))
+        restore()
+        assertEquals(100, sink.getPriority(phone))
+        assertEquals(listOf(phone), sink.connects)
+        assertFalse(prefs.getBoolean("applied", false))
+        assertTrue(SinkAdapter.requests.all { it == 11 })
+        assertEquals(0, SinkAdapter.powerChanges)
+    }
+
+    @Test fun unrelatedPhoneBroadcastDoesNotDropItOrReapplySelectedPhone() {
+        start()
+        val requests = SinkAdapter.requests.toList()
+        connectionChanged(other, BluetoothProfile.STATE_CONNECTED)
+        assertEquals(requests, SinkAdapter.requests)
+        assertEquals(listOf(phone), sink.disconnects)
+        assertEquals(100, sink.getPriority(other))
+    }
+
+    @Test fun connectionBroadcastAfterSessionEndsDoesNotYieldAgain() {
+        start()
+        restore()
+        connectionChanged(phone, BluetoothProfile.STATE_CONNECTED)
+        assertEquals(listOf(phone), sink.disconnects)
+        assertEquals(100, sink.getPriority(phone))
         assertFalse(prefs.getBoolean("applied", false))
     }
 
@@ -366,14 +427,116 @@ class BluetoothMediaYieldTest {
         assertFalse(prefs.getBoolean("applied", false))
     }
 
-    @Test fun replacementPhoneCannotInheritAnotherPhonesRecoveryJournal() {
-        start()
+    @Test fun pendingRecoveryOfOldPhoneDoesNotBlockNewPhoneAndBothRecordsSurvive() {
+        // A journal left by the old single-target format must survive adding the next phone.
+        prefs.edit().putBoolean("applied", true).putString("applied_mode", "media")
+            .putString("applied_targets", phone.address).putInt("media_original_policy", 100)
+            .putBoolean("media_was_connected", true).commit()
+        sink.policies[phone] = 0
+        sink.states[phone] = BluetoothProfile.STATE_DISCONNECTED
+        sink.states[other] = BluetoothProfile.STATE_CONNECTED
+        CarBluetoothProfileGuard.recoverIfStale(context, logs::add)
+        awaitWorker() // Restoring the old phone must not displace the new one.
+        assertEquals(0, sink.getPriority(phone))
+        assertTrue(prefs.getBoolean("applied", false))
         start(other.address)
-        assertEquals(listOf(phone to 0), sink.writes)
+        assertEquals(listOf(other to 0), sink.writes)
+        assertEquals(BluetoothProfile.STATE_DISCONNECTED, sink.getConnectionState(other))
+        assertEquals(setOf(phone.address, other.address), prefs.getString("applied_targets", "")!!.split(',').toSet())
+        restore() // Prefer the session's latest phone; retain the old phone's deferred recovery.
+        assertEquals(100, sink.getPriority(other))
+        assertEquals(0, sink.getPriority(phone))
         assertEquals(phone.address, prefs.getString("applied_targets", null))
+        assertEquals(listOf(other), sink.connects)
+        sink.states[other] = BluetoothProfile.STATE_DISCONNECTED
+        CarBluetoothProfileGuard.recoverIfStale(context, logs::add)
+        awaitWorker()
+        assertEquals(100, sink.getPriority(phone))
+        assertEquals(listOf(other, phone), sink.connects)
+        assertFalse(prefs.getBoolean("applied", false))
+        assertTrue(SinkAdapter.requests.all { it == 11 })
+        assertEquals(0, SinkAdapter.powerChanges)
+    }
+
+    @Test fun recoveryDoesNotDisplaceTheLatestPhoneWhileItIsStillConnecting() {
+        start()
+        sink.states[other] = BluetoothProfile.STATE_CONNECTED
+        start(other.address)
+        sink.connectState = BluetoothProfile.STATE_CONNECTING
         restore()
-        assertEquals(listOf(phone to 0, phone to 100), sink.writes)
+        assertEquals(listOf(other), sink.connects)
+        assertEquals(0, sink.getPriority(phone))
+        assertEquals(phone.address, prefs.getString("applied_targets", null))
+        sink.states[other] = BluetoothProfile.STATE_DISCONNECTED
+        CarBluetoothProfileGuard.recoverIfStale(context, logs::add)
+        awaitWorker()
+        assertEquals(100, sink.getPriority(phone))
+        assertFalse(prefs.getBoolean("applied", false))
+    }
+
+    @Test fun returningToPreviouslyJournaledPhoneRestoresThatPhoneFirst() {
+        start()
+        sink.states[other] = BluetoothProfile.STATE_CONNECTED
+        start(other.address)
+        start(phone.address)
+        restore()
         assertEquals(listOf(phone), sink.connects)
+        assertEquals(100, sink.getPriority(phone))
+        assertEquals(0, sink.getPriority(other))
+        assertEquals(other.address, prefs.getString("applied_targets", null))
+    }
+
+    @Test fun eachPhoneRetainsItsOwnOriginalConnectionState() {
+        start()
+        start(other.address) // The second phone was originally disconnected.
+        restore()
+        assertEquals(100, sink.getPriority(other))
+        assertEquals(listOf(phone), sink.connects)
+        assertFalse(prefs.getBoolean("applied", false))
+    }
+
+    @Test fun acceptedDisconnectMustActuallyCompleteBeforeYieldIsSettled() {
+        sink.disconnectState = BluetoothProfile.STATE_DISCONNECTING
+        start()
+        assertTrue(logs.any { it.contains("disconnectRequested=true state=3 mediaDisconnected=false") })
+        connectionChanged(phone, BluetoothProfile.STATE_DISCONNECTED)
+        assertTrue(logs.any { it.contains("state=0 mediaDisconnected=true") })
+        assertEquals(listOf(phone), sink.disconnects)
+    }
+
+    @Test fun retryCannotMutatePolicyUntilJournalCommitSucceeds() {
+        val realPrefs = prefs
+        var commitAllowed = false
+        val failingPrefs = object : SharedPreferences by realPrefs {
+            override fun edit(): SharedPreferences.Editor {
+                val editor = realPrefs.edit()
+                return java.lang.reflect.Proxy.newProxyInstance(SharedPreferences.Editor::class.java.classLoader,
+                    arrayOf(SharedPreferences.Editor::class.java)) { proxy, method, args ->
+                    val result = method.invoke(editor, *(args ?: emptyArray()))
+                    when {
+                        method.name == "commit" -> result == true && commitAllowed
+                        result === editor -> proxy
+                        else -> result
+                    }
+                } as SharedPreferences.Editor
+            }
+        }
+        val failingContext = object : ContextWrapper(context) {
+            override fun getApplicationContext(): Context = this
+            override fun getSharedPreferences(name: String, mode: Int): SharedPreferences = failingPrefs
+        }
+        CarBluetoothProfileGuard.yieldForSession(failingContext, phone.address, log = logs::add)
+        awaitWorker()
+        assertTrue(prefs.getBoolean("applied", false)) // Like Android, the failed commit already changed memory.
+        CarBluetoothProfileGuard.yieldNow()
+        awaitWorker()
+        assertTrue(sink.writes.isEmpty())
+        commitAllowed = true
+        CarBluetoothProfileGuard.yieldNow()
+        awaitWorker()
+        assertEquals(listOf(phone to 0), sink.writes)
+        restore()
+        assertEquals(100, sink.getPriority(phone))
     }
 
     @Test fun radioInitiallyOffIsLeftOffWithoutARecoveryJournal() {
@@ -415,6 +578,7 @@ class BluetoothMediaYieldTest {
         var applyWrites = true
         var rejectPolicy: Int? = null
         var disconnectAccepted = true
+        var disconnectState = BluetoothProfile.STATE_DISCONNECTED
         var connectState = BluetoothProfile.STATE_CONNECTED
         var beforeWrite: (() -> Unit)? = null
         fun getPriority(device: BluetoothDevice): Int {
@@ -431,7 +595,7 @@ class BluetoothMediaYieldTest {
         fun disconnect(device: BluetoothDevice): Boolean {
             disconnects += device
             if (!disconnectAccepted) return false
-            states[device] = BluetoothProfile.STATE_DISCONNECTED
+            states[device] = disconnectState
             return true
         }
         fun connect(device: BluetoothDevice): Boolean {
@@ -441,7 +605,8 @@ class BluetoothMediaYieldTest {
         }
         override fun getConnectionState(device: BluetoothDevice?) = states[device] ?: BluetoothProfile.STATE_DISCONNECTED
         override fun getConnectedDevices() = states.filterValues { it == BluetoothProfile.STATE_CONNECTED }.keys.toList()
-        override fun getDevicesMatchingConnectionStates(states: IntArray?) = getConnectedDevices()
+        override fun getDevicesMatchingConnectionStates(states: IntArray?) =
+            this.states.filterValues { it in (states ?: intArrayOf()) }.keys.toList()
     }
 
     class ModernSink : Sink() {
