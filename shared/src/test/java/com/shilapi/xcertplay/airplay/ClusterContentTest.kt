@@ -1,5 +1,6 @@
 package com.shilapi.xcertplay.airplay
 
+import com.shilapi.xcertplay.hud.NavigationOutputs
 import java.net.Socket
 import java.io.ByteArrayOutputStream
 import java.io.OutputStream
@@ -13,13 +14,13 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [29], manifest = Config.NONE)
 class ClusterContentTest {
-    private fun session(initialUrl: String, onTeardown: (AirPlaySession) -> Unit = {}): AirPlaySession = AirPlaySession(
+    private fun session(initialUrl: String, listener: AirPlaySessionListener = object : AirPlaySessionListener {}, onTeardown: (AirPlaySession) -> Unit = {}): AirPlaySession = AirPlaySession(
         socket = Socket(),
         config = AirPlayConfig(deviceName = "test", deviceId = "02:00:00:00:00:02", btMac = "02:00:00:00:00:01",
             sourceVersion = "1", main = AirPlayDisplayConfig(widthPixels = 800, heightPixels = 480),
             cluster = AirPlayDisplayConfig(widthPixels = 1600, heightPixels = 600, initialUrl = initialUrl)),
         identity = AirPlayIdentity.generate(), pairings = PairingStore(), mfi = null,
-        listener = object : AirPlaySessionListener {}, media = object : AirPlayMediaHandler {
+        listener = listener, media = object : AirPlayMediaHandler {
             override fun onScreen(session: AirPlaySession, type: Int, stream: Map<String, Any?>): Int = 1
             override fun onTeardown(session: AirPlaySession, type: Int) { onTeardown(session) }
         },
@@ -35,6 +36,18 @@ class ClusterContentTest {
             BplistCodec.encode(mapOf("streams" to listOf(mapOf("type" to 111L)))))
         session.javaClass.getDeclaredMethod("handleTeardown", RtspMessage.Request::class.java).apply { isAccessible = true }
             .invoke(session, request)
+    }
+
+    @Test fun setupReadyNotifiesSessionOwnerAfterClusterIsAvailable() {
+        val available = mutableListOf<Int>()
+        val session = session(CarPlayClusterDisplay.MAP_URL, listener = object : AirPlaySessionListener {
+            override fun onClusterControlReady(session: AirPlaySession) { available += session.clusterStream }
+        })
+        try {
+            setup(session)
+            readyAfterSetup(session)
+            assertEquals(listOf(1), available)
+        } finally { session.close() }
     }
 
     @Test fun aFailedShowUiMustNotClaimThatATurnCardHasBecomeAMap() {
@@ -116,6 +129,79 @@ class ClusterContentTest {
             assertTrue(states.all { it["appStateID"] == 3L && !it.containsKey("entity") })
             assertEquals(CarPlayClusterDisplay.MAP_URL, session.clusterUrl())
         } finally { session.close() }
+    }
+
+    @Test fun navigationExitReportCorrelatesWritesArbitrationAndLateTerminal() {
+        val lines = mutableListOf<String>()
+        NavigationOutputs.attachReport { lines.add(it) }
+        NavigationOutputs.onSessionActive { true }
+        val id = NavigationOutputs.navigationExitAction()
+        val session = session(CarPlayClusterDisplay.MAP_URL)
+        try {
+            eventReady(session)
+            assertTrue(session.requestNavigationExit(id))
+            session.javaClass.getDeclaredMethod("releaseNavigationExit", String::class.java)
+                .apply { isAccessible = true }.invoke(session, "timeout")
+            val modes = RtspMessage.Request("POST", "/command", "RTSP/1.0", emptyMap(),
+                BplistCodec.encode(mapOf("type" to "modesChanged", "params" to mapOf(
+                    "appStates" to listOf(mapOf("appStateID" to 3, "entity" to 2))))))
+            session.javaClass.getDeclaredMethod("handleCommand", RtspMessage.Request::class.java)
+                .apply { isAccessible = true }.invoke(session, modes)
+            NavigationOutputs.navigationExitTerminal(0)
+            NavigationOutputs.navigationExitTerminal(2)
+            NavigationOutputs.diagnostic("exit cleanup accepted=true")
+            NavigationOutputs.navigationExitFinished("phone-end")
+            val events = lines.filter { it.contains("request=$id ") }
+            assertTrue(events.any { it.contains("action=2") })
+            assertTrue(events.any { it.contains("claim written=true") })
+            assertTrue(events.any { it.contains("release reason=timeout written=true") })
+            assertTrue(events.any { it.contains("modesChanged entity=2") })
+            assertEquals(1, events.count { it.contains("phoneState=") })
+            assertTrue(events.any { it.contains("phoneState=0") && it.contains("requestAgeMs=") })
+            assertTrue(events.any { it.contains("cleanup accepted=true") })
+            assertTrue(events.any { it.contains("finished reason=phone-end terminalSeen=true") })
+        } finally { session.close() }
+    }
+
+    @Test fun duplicateExitActionReportsCoalescedClaim() {
+        val lines = mutableListOf<String>()
+        NavigationOutputs.attachReport { lines.add(it) }
+        NavigationOutputs.onSessionActive { true }
+        val session = session(CarPlayClusterDisplay.MAP_URL)
+        try {
+            val event = eventReady(session)
+            val first = NavigationOutputs.navigationExitAction()
+            assertTrue(session.requestNavigationExit(first))
+            val second = NavigationOutputs.navigationExitAction()
+            assertTrue(session.requestNavigationExit(second))
+            assertEquals(1, commands(event).size)
+            assertTrue(lines.any { it.contains("request=$first ") && it.contains("claim written=true") })
+            assertTrue(lines.any { it.contains("request=$second ") && it.contains("claim coalesced withRequest=$first") })
+            assertFalse(lines.any { it.contains("request=$second ") && it.contains("claim written=true") })
+        } finally {
+            session.close()
+            NavigationOutputs.navigationExitFinished("test")
+        }
+    }
+
+    @Test fun oldSessionCleanupCannotFinishOrMisattributeNewRequest() {
+        val lines = mutableListOf<String>()
+        NavigationOutputs.attachReport { lines.add(it) }
+        NavigationOutputs.onSessionActive { true }
+        val old = NavigationOutputs.navigationExitAction()
+        val cleanup = NavigationOutputs.scopedClear {
+            NavigationOutputs.diagnostic("cleanup idle=failed")
+            NavigationOutputs.navigationExitFinished("old-cleanup")
+        }
+        NavigationOutputs.onSessionActive { true }
+        val current = NavigationOutputs.navigationExitAction()
+        cleanup()
+        NavigationOutputs.navigationExitTerminal(0)
+        NavigationOutputs.navigationExitFinished("new-cleanup")
+        assertTrue(lines.any { it.contains("request=$old ") && it.contains("cleanup idle=failed") })
+        assertFalse(lines.any { it.contains("request=$current ") && it.contains("cleanup idle=failed") })
+        assertTrue(lines.any { it.contains("request=$current ") && it.contains("phoneState=0") })
+        assertTrue(lines.any { it.contains("request=$current ") && it.contains("finished reason=new-cleanup") })
     }
 
     @Test fun navigationExitWithoutAnAcknowledgmentReleasesOnTimeout() {

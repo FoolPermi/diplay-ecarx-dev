@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.graphics.Color
 import android.view.Display
 import android.view.Surface
+import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 
@@ -38,6 +39,7 @@ internal class EcarxClusterPresentation(
     context: Context,
     display: Display,
     private val onSurface: (Surface?) -> Unit,
+    private val onPresented: (Surface) -> Unit = {},
 ) : Presentation(context, display) {
 
     private var texture: ClusterVideoTexture? = null
@@ -49,11 +51,28 @@ internal class EcarxClusterPresentation(
         texture?.setVideoSize(width, height)
     }
 
+    /** View sizes are layout observations; neither the decoded stream nor final cluster visibility. */
+    fun videoGeometryDiagnostics(): String {
+        val mode = display.mode
+        val decor = window?.peekDecorView()
+        val content = texture?.parent as? View
+        val sizes = listOf(
+            "displayMode" to (mode.physicalWidth to mode.physicalHeight),
+            "windowDecor" to (decor?.width to decor?.height),
+            "contentLayout" to (content?.width to content?.height),
+            "textureLayout" to (texture?.width to texture?.height),
+            "surfaceCallback" to (texture?.surfaceCallbackSize?.first to texture?.surfaceCallbackSize?.second),
+            "expectedVideo" to videoSize,
+        )
+        return sizes.joinToString(" ") { (name, size) ->
+            val (width, height) = size
+            "$name=" + if (width != null && height != null && width > 0 && height > 0) "${width}x$height" else "unknown"
+        } + " decodedVideo=unobserved"
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // `onPresented` is left at its default: nothing here needs a per-frame callback, and an
-        // empty lambda at this call site would add a class to the dex for no behaviour at all.
-        val view = ClusterVideoTexture(context, onSurface = onSurface)
+        val view = ClusterVideoTexture(context, onPresented = onPresented, onSurface = onSurface)
         texture = view
         view.setVideoSize(videoSize.first, videoSize.second)
         setContentView(FrameLayout(context).apply {

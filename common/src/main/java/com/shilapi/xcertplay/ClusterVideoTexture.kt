@@ -7,10 +7,13 @@ import android.view.Surface
 import android.view.TextureView
 
 /** Owns only the Surface wrapper; returning true lets TextureView release its texture. */
-internal class ClusterVideoTexture(context: Context, private val onPresented: () -> Unit = {},
+internal class ClusterVideoTexture(context: Context, private val onPresented: (Surface) -> Unit = {},
     private val onSurface: (Surface?) -> Unit) :
     TextureView(context), java.io.Closeable {
     private var output: Surface? = null
+    private var outputTexture: SurfaceTexture? = null
+    var surfaceCallbackSize: Pair<Int, Int>? = null
+        private set
     private var videoWidth = 1920
     private var videoHeight = 720
     private val pictureBinding = CarPlayPicture.Binding(this)
@@ -19,13 +22,18 @@ internal class ClusterVideoTexture(context: Context, private val onPresented: ()
         surfaceTextureListener = object : SurfaceTextureListener {
             override fun onSurfaceTextureAvailable(texture: SurfaceTexture, width: Int, height: Int) {
                 releaseOutput()
+                surfaceCallbackSize = width to height
+                outputTexture = texture
                 setVideoSize(videoWidth, videoHeight)
                 output = Surface(texture).also(onSurface)
             }
             override fun onSurfaceTextureSizeChanged(texture: SurfaceTexture, width: Int, height: Int) {
+                surfaceCallbackSize = width to height
                 setVideoSize(videoWidth, videoHeight)
             }
-            override fun onSurfaceTextureUpdated(texture: SurfaceTexture) { onPresented() }
+            override fun onSurfaceTextureUpdated(texture: SurfaceTexture) {
+                if (texture === outputTexture) output?.let(onPresented)
+            }
             override fun onSurfaceTextureDestroyed(texture: SurfaceTexture): Boolean {
                 releaseOutput()
                 return true
@@ -46,6 +54,8 @@ internal class ClusterVideoTexture(context: Context, private val onPresented: ()
         })
     }
     private fun releaseOutput() {
+        surfaceCallbackSize = null
+        outputTexture = null
         if (output == null) return
         onSurface(null)
         output?.release()

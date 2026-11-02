@@ -17,9 +17,68 @@ object NavigationOutputs {
 
     @Volatile internal var debugLogsEnabled: () -> Boolean = { false }
 
-    @Volatile internal var requestNavigationExit: (() -> Boolean)? = null
+    @Volatile internal var requestNavigationExit: ((Long) -> Boolean)? = null
+
+    private val diagnosticLock = Any()
+    private val diagnosticBacklog = ArrayDeque<String>()
+    private var diagnosticSink: ((String) -> Unit)? = null
+    private var sessionNumber = 0L
+    private var requestNumber = 0L
+    private var requestId: Long? = null
+    private val requests = linkedMapOf<Long, Pair<Long, Long>>()
+    private var terminalSeen = false
+    private data class CleanupContext(val session: Long, val requestId: Long?)
+    private val cleanupContext = ThreadLocal<CleanupContext>()
+    private val processStartedNanos = System.nanoTime()
+
+    fun diagnostic(event: String, id: Long? = null) = synchronized(diagnosticLock) {
+        val elapsedMs = (System.nanoTime() - processStartedNanos) / 1_000_000
+        val context = cleanupContext.get()
+        val request = id ?: if (context != null) context.requestId else requestId
+        val origin = requests[request]
+        val age = if (origin != null) " requestAgeMs=${(System.nanoTime() - origin.second) / 1_000_000} association=${if (request == requestId) "active" else "ended"}" else ""
+        val line = "navigation session=${origin?.first ?: context?.session ?: sessionNumber} request=${request ?: "none"} tMs=$elapsedMs$age $event"
+        val sink = diagnosticSink
+        if (sink != null) sink(line) else {
+            if (diagnosticBacklog.size >= 128) diagnosticBacklog.removeFirst()
+            diagnosticBacklog.addLast(line)
+        }
+    }
+
+    internal fun navigationExitAction(): Long = synchronized(diagnosticLock) {
+        if (requestId != null) diagnostic("exit association replaced")
+        requestId = ++requestNumber
+        if (requests.size >= 128) requests.remove(requests.keys.first())
+        requests[requestNumber] = sessionNumber to System.nanoTime()
+        terminalSeen = false
+        diagnostic("exit action=2")
+        requestNumber
+    }
+
+    internal fun navigationExitTerminal(state: Int) = synchronized(diagnosticLock) {
+        if (requestId != null && !terminalSeen) {
+            terminalSeen = true
+            diagnostic("exit phoneState=$state")
+        }
+    }
+
+    internal fun navigationExitFinished(reason: String) = synchronized(diagnosticLock) {
+        val context = cleanupContext.get()
+        if (requestId != null && (context == null || context.requestId == requestId)) {
+            diagnostic("exit association finished reason=$reason terminalSeen=$terminalSeen")
+            requestId = null
+        }
+    }
 
     private val ecarx = NavigationOutputWorker("diplay-ecarx-output", EcarxHudBridge::clear)
+
+    internal fun scopedClear(clear: () -> Unit = EcarxHudBridge::clear): () -> Unit {
+        val context = synchronized(diagnosticLock) { CleanupContext(sessionNumber, requestId) }
+        return {
+            cleanupContext.set(context)
+            try { clear() } finally { cleanupContext.remove() }
+        }
+    }
 
     /**
      * Initialize the bridge before a phone connects. It clears an old projection request rather
@@ -36,7 +95,7 @@ object NavigationOutputs {
         val app = context.applicationContext
         useEcarx = EcarxCapabilities.detect(app).identified
         if (useEcarx) {
-            ecarx.start {
+            ecarx.start(clear = scopedClear()) {
                 EcarxHudBridge.recoverFactoryNavigationIfIdle(app)
                 EcarxHudBridge.initialize(app)
                 EcarxHudBridge.setCurrentSession(currentSession)
@@ -63,6 +122,11 @@ object NavigationOutputs {
      * only in logcat, which a car has no way to return.
      */
     fun attachReport(sink: (String) -> Unit) {
+        synchronized(diagnosticLock) {
+            diagnosticSink = sink
+            diagnosticBacklog.forEach(sink)
+            diagnosticBacklog.clear()
+        }
         EcarxHudBridge.attachReport(sink)
     }
 
@@ -94,18 +158,28 @@ object NavigationOutputs {
     }
 
     /** Route-update silence is not a disconnect; the transport owns this liveness check. */
-    internal fun onSessionActive(debugLogs: () -> Boolean = { false }, requestExit: (() -> Boolean)? = null, isCurrent: () -> Boolean) {
+    internal fun onSessionActive(debugLogs: () -> Boolean = { false }, requestExit: ((Long) -> Boolean)? = null, newSession: Boolean = true, replacePrevious: Boolean = false, isCurrent: () -> Boolean) {
+        val clearPrevious = if (replacePrevious) scopedClear() else null
+        if (newSession) synchronized(diagnosticLock) {
+            navigationExitFinished("session-replaced")
+            sessionNumber++
+            diagnostic("session active")
+        }
         debugLogsEnabled = debugLogs
         requestNavigationExit = requestExit
         currentSession = isCurrent
-        if (useEcarx) ecarx.submit { EcarxHudBridge.setCurrentSession(isCurrent) }
+        if (useEcarx) ecarx.submit {
+            clearPrevious?.invoke()
+            EcarxHudBridge.setCurrentSession(isCurrent)
+        }
     }
 
     /** Best effort while alive; Android does not guarantee callbacks before force-stop. */
     fun endNow() {
+        diagnostic("session closing")
         requestNavigationExit = null
         debugLogsEnabled = { false }
         currentSession = null
-        ecarx.clear()
+        ecarx.clear(scopedClear())
     }
 }

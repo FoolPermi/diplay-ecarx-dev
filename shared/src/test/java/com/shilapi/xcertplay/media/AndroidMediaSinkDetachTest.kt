@@ -38,6 +38,38 @@ class AndroidMediaSinkDetachTest {
         }
     }
 
+    @Test fun retiredClusterDecoderCannotReportAsItsReplacement() {
+        val sink = AndroidMediaSink(surface = null)
+        val messages = ConcurrentLinkedQueue<String>()
+        @Suppress("UNCHECKED_CAST")
+        val decoders = AndroidMediaSink::class.java.getDeclaredField("videoDecoders")
+            .apply { isAccessible = true }.get(sink) as Map<Int, Any>
+        fun report(decoder: Any, message: String) {
+            @Suppress("UNCHECKED_CAST")
+            val callback = decoder.javaClass.getDeclaredField("report").apply { isAccessible = true }
+                .get(decoder) as (String) -> Unit
+            callback(message)
+        }
+        try {
+            sink.setVideoDiagnosticHandler(111) { messages += it }
+            sink.onVideoFrame(111, predicted)
+            val first = checkNotNull(decoders[111])
+            sink.setVideoDiagnosticHandler(111) { messages += it }
+            report(first, "first frame rendered")
+            assertTrue(messages.contains("first frame rendered")) // A live decoder may be reused.
+            messages.clear()
+            sink.onScreenStreamActive(111, false)
+            sink.setVideoDiagnosticHandler(111) { messages += it }
+            sink.onVideoFrame(111, predicted)
+            val second = checkNotNull(decoders[111])
+            assertNotSame(first, second)
+            report(first, "first frame rendered")
+            report(second, "first frame rendered")
+            assertTrue(messages.contains("inactive decoder first frame rendered"))
+            assertEquals(1, messages.count { it == "first frame rendered" })
+        } finally { sink.close() }
+    }
+
     @Test fun aDetachIsConfirmedWhileFramesAreQueued() {
         val surface = Surface(SurfaceTexture(0))
         val sink = AndroidMediaSink(surface = surface, videoPacingDelayMillis = 90)

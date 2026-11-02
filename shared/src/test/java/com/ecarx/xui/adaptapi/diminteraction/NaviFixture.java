@@ -12,6 +12,7 @@ public class NaviFixture implements INaviInteraction {
     public boolean handlerNavigationActive;
     public boolean resendOngoing;
     public boolean navigationMute;
+    public String destinationName = "";
     public final List<Boolean> ongoingTransitions = new ArrayList<>();
     public final List<String> navigationEvents = new ArrayList<>();
 
@@ -52,6 +53,16 @@ public class NaviFixture implements INaviInteraction {
     public void updateDistanceToDestination(int meters) { FixtureLog.capture("updateDistanceToDestination", "meters", meters); }
     public void updateETA(int epochSeconds) { FixtureLog.capture("updateETA", "epochSeconds", epochSeconds); }
     public void updateNextGuidancePointName(String name) { FixtureLog.capture("updateNextGuidancePointName", "name", name); }
+    public void updateAddresses(int type, List<IAddress> addresses) {
+        // Type 3 deliberately never reads coordinates or caches selectable addresses on 753.
+        String name = addresses.isEmpty() ? "" : addresses.get(0).getAddressName();
+        FixtureLog.capture("updateAddresses", "type", type, "count", addresses.size(), "name", name);
+        if (type == TYPE_DESTINATION && !destinationName.equals(name)) {
+            destinationName = name;
+            sendNavigationEvent(ongoingNavigationActive ? "ongoingNavi" : "idle");
+            resendOngoing = false;
+        }
+    }
     public void updateLaneInfo(ILaneInfo[] lanes) {
         List<Map<String, Object>> values = null;
         if (lanes != null) {

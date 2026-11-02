@@ -4,7 +4,6 @@ import android.content.Context
 import android.hardware.display.DisplayManager
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
 import android.view.Surface
 import com.shilapi.xcertplay.hud.NavigationOutputs
 import com.shilapi.xcertplay.hud.EcarxOutputSettings
@@ -17,7 +16,6 @@ internal class EcarxClusterSession(
     context: Context,
     private val controller: CarPlayController,
     private val sink: AndroidMediaSink,
-    private var report: (String) -> Unit,
 ) {
     private val app = context.applicationContext
     private val main = Handler(Looper.getMainLooper())
@@ -26,6 +24,10 @@ internal class EcarxClusterSession(
     private var surface: Surface? = null
     private var outputSession: AirPlaySession? = null
     private var mirrorMain = false
+    private var binding = 0
+    private var firstFrameObserved = false
+    private var projectionRequested = false
+    private var showFailure: String? = null
     @Volatile private var wanted = false
     @Volatile private var closed = false
     private val stateListener: () -> Unit = ::onSessionChanged
@@ -45,22 +47,23 @@ internal class EcarxClusterSession(
     /** DIM calls under its own lock: record intent and return without calling back into the bridge. */
     fun onRouteRequested(show: Boolean) {
         if (closed) return
+        val changed = wanted != show
         wanted = show
-        main.post(::apply)
+        main.post {
+            if (changed) log("intent wanted=$show source=route-and-option")
+            apply()
+        }
     }
 
     fun onSessionChanged() {
         main.post(::apply)
     }
 
-    fun attachReport(sink: (String) -> Unit) {
-        report = sink
-    }
-
     fun diagnostics(): String =
         "sessionActive=${controller.activeAirPlaySession() != null} panelWanted=$wanted " +
             "presentationShowing=${presentation?.isShowing == true} clusterSurfaceValid=${surface?.isValid == true} " +
-            "source=${if (mirrorMain) "main-mirror" else "independent-map"}"
+            "source=${if (mirrorMain) "main-mirror" else "independent-map"} " +
+            "binding=$binding firstFrameObserved=$firstFrameObserved projectionRequested=$projectionRequested physicalDisplay=unobserved"
 
     private fun apply() {
         if (closed) return
@@ -76,15 +79,27 @@ internal class EcarxClusterSession(
         }
         surface?.takeIf { it.isValid }?.let {
             if (mirrorMain) sink.setMirrorSurface(110, MIRROR_KEY, it) else sink.setSurface(111, it)
-            val accepted = NavigationOutputs.requestPresentation(app, true, "cluster surface ready")
-            controller.setClusterOutputVisible(accepted && !mirrorMain)
+            // The phone must draw before DIM selects this window; waiting for DIM here would deadlock first-frame gating.
+            controller.setClusterOutputVisible(!mirrorMain)
+            if ((mirrorMain || firstFrameObserved) && !projectionRequested) {
+                projectionRequested = NavigationOutputs.requestPresentation(app, true,
+                    if (mirrorMain) "cluster mirror surface ready" else "cluster first texture frame")
+            }
         }
         if (presentation != null) return
         val display = displays?.getDisplay(DISPLAY_ID) ?: return
         lateinit var panel: EcarxClusterPresentation
-        panel = EcarxClusterPresentation(app, display) { next ->
+        panel = EcarxClusterPresentation(app, display, onSurface = { next ->
             if (presentation === panel) onSurface(next)
-        }
+        }, onPresented = { observedSurface ->
+            if (!closed && wanted && presentation === panel && controller.activeAirPlaySession() === outputSession &&
+                surface === observedSurface && observedSurface.isValid && !mirrorMain && !firstFrameObserved) {
+                firstFrameObserved = true
+                log("video first-frame stream=111 binding=$binding observation=texture-updated " +
+                    "${panel.videoGeometryDiagnostics()} physicalDisplay=unobserved")
+                main.post(::apply)
+            }
+        })
         val video = CarPlayBackgroundSession.snapshot()
         if (mirrorMain && video != null) panel.setVideoSize(video.width, video.height)
         else panel.setVideoSize(WIDTH, HEIGHT)
@@ -94,7 +109,7 @@ internal class EcarxClusterSession(
             if (presentation === panel) {
                 presentation = null
                 onSurface(null)
-                log("Cluster panel: session window dismissed")
+                log("window dismissed source=window-callback")
                 if (!closed && wanted) main.post(::apply)
             }
         }
@@ -104,12 +119,15 @@ internal class EcarxClusterSession(
             presentation = null
             onSurface(null)
             runCatching { panel.dismiss() }
-            log("Cluster panel: show failed ${error.message}")
+            val failure = error.javaClass.simpleName
+            if (showFailure != failure) log("window show-failed error=$failure")
+            showFailure = failure
             return
         }
-        log("Cluster panel: window created on \"${display.name}\" " +
-            "${display.mode.physicalWidth}x${display.mode.physicalHeight} awaitingSurface=${surface == null} " +
-            "source=${if (mirrorMain) "main-mirror" else "independent-map"} session-owned")
+        showFailure = null
+        log("window shown awaitingSurface=${surface == null} " +
+            "source=${if (mirrorMain) "main-mirror" else "independent-map"} " +
+            "${panel.videoGeometryDiagnostics()} physicalDisplay=unobserved")
     }
 
     private fun hide() {
@@ -117,23 +135,29 @@ internal class EcarxClusterSession(
         val panel = presentation ?: return
         presentation = null
         onSurface(null)
-        runCatching { panel.dismiss() }
-        log("Cluster panel: dismissed session-owned")
+        val dismissed = runCatching { panel.dismiss() }
+        log("window dismiss-return accepted=${dismissed.isSuccess} showing=${panel.isShowing} source=session-owner")
     }
 
     private fun onSurface(next: Surface?) {
         val previous = surface
         if (previous === next) return
         if (previous != null) {
+            if (next != null && projectionRequested) NavigationOutputs.requestPresentation(app, false, "cluster binding replaced")
             if (mirrorMain) sink.setMirrorSurface(110, MIRROR_KEY, null) else sink.clearSurface(111, previous)
         }
         surface = next
+        firstFrameObserved = false
+        projectionRequested = false
         if (next != null) {
+            binding++
+            log("surface attached binding=$binding valid=${next.isValid} source=${if (mirrorMain) "main-mirror" else "independent-map"} " +
+                "${presentation?.videoGeometryDiagnostics()}")
             apply()
         } else {
             controller.setClusterOutputVisible(false)
             NavigationOutputs.requestPresentation(app, false, "cluster surface detached")
-            log("Cluster surface: detached ${diagnostics()}")
+            log("surface detached binding=$binding")
         }
     }
 
@@ -149,8 +173,7 @@ internal class EcarxClusterSession(
     }
 
     private fun log(message: String) {
-        Log.i("DiPlay-Cluster", message)
-        report(message)
+        NavigationOutputs.diagnostic("panel $message")
     }
 
     companion object {

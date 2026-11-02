@@ -38,22 +38,26 @@ class EcarxClusterFirstFrameTest {
     private lateinit var output: EcarxClusterSession
     private lateinit var panels: MockedConstruction<EcarxClusterPresentation>
     private val surfaceCallbacks = mutableListOf<(Surface?) -> Unit>()
+    private val frameCallbacks = mutableListOf<(Surface) -> Unit>()
+    private val events = mutableListOf<String>()
     private val display = CarPlaySessionDisplay(1920, 1080, Surface.ROTATION_0, true, true, 1920, 1080)
 
     @Before fun setup() {
         CarPlayBackgroundSession.clear()
+        NavigationOutputs.attachReport(events::add)
         shadowOf(app.packageManager).installPackage(PackageInfo().apply { packageName = "com.ecarx.xui.service" })
         assertEquals(1, ShadowDisplayManager.addDisplay("w1920dp-h720dp"))
         panels = mockConstruction(EcarxClusterPresentation::class.java) { panel, context ->
             assertSame("The window must not retain an Activity context", app, context.arguments()[0])
             @Suppress("UNCHECKED_CAST")
             surfaceCallbacks += context.arguments()[2] as (Surface?) -> Unit
+            frameCallbacks += context.arguments()[3] as (Surface) -> Unit
             `when`(panel.isShowing).thenReturn(true)
         }
         `when`(controller.activeAirPlaySession()).thenReturn(session)
         `when`(surface.isValid).thenReturn(true)
         CarPlayBackgroundSession.store(controller, sink, 1920, 1080, Any(), display) {}
-        CarPlayBackgroundSession.bindClusterOutput(app, controller) {}
+        CarPlayBackgroundSession.bindClusterOutput(app, controller)
         output = ReflectionHelpers.getField(CarPlayBackgroundSession, "clusterOutput")
         NavigationOutputs.onAppOpened(app)
         ReflectionHelpers.setStaticField(Class.forName("com.shilapi.xcertplay.hud.EcarxHudBridge"), "guidanceActive", true)
@@ -64,6 +68,7 @@ class EcarxClusterFirstFrameTest {
         CarPlayBackgroundSession.clear()
         idle()
         panels.close()
+        NavigationOutputs.attachReport {}
         ReflectionHelpers.setStaticField(Class.forName("com.shilapi.xcertplay.hud.EcarxHudBridge"), "guidanceActive", false)
         com.shilapi.xcertplay.hud.EcarxOutputSettings.setMirrorMainScreen(app, false)
     }
@@ -97,7 +102,7 @@ class EcarxClusterFirstFrameTest {
         ReflectionHelpers.setField(oldHost, "activeAirPlaySession", session)
         oldHost.javaClass.getDeclaredMethod("onDestroy").apply { isAccessible = true }.invoke(oldHost)
         CarPlayBackgroundSession.store(controller, sink, 1920, 1080, Any(), display) {}
-        CarPlayBackgroundSession.bindClusterOutput(app, controller) {}
+        CarPlayBackgroundSession.bindClusterOutput(app, controller)
         idle()
         assertSame(output, ReflectionHelpers.getField(CarPlayBackgroundSession, "clusterOutput"))
         assertSame(panel, panels.constructed().single())
@@ -168,6 +173,9 @@ class EcarxClusterFirstFrameTest {
         verify(controller, never()).setClusterOutputVisible(true)
         onSurface(surface)
         verify(controller, atLeastOnce()).setClusterOutputVisible(true)
+        assertFalse(NavigationOutputs.diagnosticReport(app).contains("projectionWanted=true"))
+        frameCallbacks.last()(surface)
+        idle()
         assertTrue(NavigationOutputs.diagnosticReport(app).contains("projectionWanted=true"))
     }
 
@@ -177,7 +185,7 @@ class EcarxClusterFirstFrameTest {
         val nextSink = mock(AndroidMediaSink::class.java)
         `when`(next.activeAirPlaySession()).thenReturn(session)
         CarPlayBackgroundSession.store(next, nextSink, 1920, 1080, Any(), display) {}
-        CarPlayBackgroundSession.bindClusterOutput(app, next) {}
+        CarPlayBackgroundSession.bindClusterOutput(app, next)
         val replacement = ReflectionHelpers.getField<EcarxClusterSession>(CarPlayBackgroundSession, "clusterOutput")
         replacement.onRouteRequested(true)
         idle()
@@ -227,6 +235,7 @@ class EcarxClusterFirstFrameTest {
         verify(sink).setMirrorSurface(110, "ecarx-cluster-main", surface)
         verify(sink, never()).setSurface(111, surface)
         verify(panels.constructed().last()).setVideoSize(1920, 1080)
+        assertTrue("Mirror mode does not wait for stream 111", NavigationOutputs.diagnosticReport(app).contains("projectionWanted=true"))
         verify(controller, never()).setClusterOutputVisible(true)
 
         com.shilapi.xcertplay.hud.EcarxOutputSettings.setMirrorMainScreen(app, false)
@@ -244,6 +253,113 @@ class EcarxClusterFirstFrameTest {
         onSurface(surface)
         verify(sink).setSurface(111, surface)
         verify(sink, never()).clearSurface(110, surface)
+    }
+
+    @Test fun independentProjectionWaitsForTheCurrentBindingsFirstTextureFrame() {
+        events.clear()
+        open()
+        assertFalse("A bound Surface must request phone content before arming the platform projection",
+            NavigationOutputs.diagnosticReport(app).contains("projectionWanted=true"))
+        verify(controller, atLeastOnce()).setClusterOutputVisible(true)
+        assertTrue("Waiting for pixels retains navigation ownership", NavigationOutputs.diagnosticReport(app).contains(" active=true"))
+        assertTrue(events.none { "lifecycle stop" in it || "lane clear" in it })
+        frameCallbacks.last()(surface)
+        idle()
+        assertTrue(NavigationOutputs.diagnosticReport(app).contains("projectionWanted=true"))
+    }
+
+    @Test fun replacingTheSurfaceAndRetogglingWaitAgainAndIgnoreLateFrames() {
+        open()
+        frameCallbacks.last()(surface)
+        idle()
+        assertTrue(NavigationOutputs.diagnosticReport(app).contains("projectionWanted=true"))
+        events.clear()
+        repeat(3) { frameCallbacks.last()(surface); idle() }
+        assertTrue(events.none { "presentation request show=true" in it })
+
+        val replacement = mock(Surface::class.java)
+        `when`(replacement.isValid).thenReturn(true)
+        surfaceCallbacks.last()(replacement)
+        assertFalse(NavigationOutputs.diagnosticReport(app).contains("projectionWanted=true"))
+        frameCallbacks.last()(surface)
+        idle()
+        assertFalse(NavigationOutputs.diagnosticReport(app).contains("projectionWanted=true"))
+        frameCallbacks.last()(replacement)
+        idle()
+        assertTrue(NavigationOutputs.diagnosticReport(app).contains("projectionWanted=true"))
+
+        output.onRouteRequested(false)
+        frameCallbacks.last()(replacement) // Intent changed before the queued window hide.
+        idle()
+        assertFalse(NavigationOutputs.diagnosticReport(app).contains("projectionWanted=true"))
+        output.onRouteRequested(true)
+        idle()
+        onSurface(replacement)
+        frameCallbacks.first()(replacement) // The dismissed window cannot arm the replacement.
+        idle()
+        assertFalse(NavigationOutputs.diagnosticReport(app).contains("projectionWanted=true"))
+        output.onRouteRequested(false)
+        frameCallbacks.last()(replacement) // Hidden before this binding received its first frame.
+        idle()
+        assertFalse(NavigationOutputs.diagnosticReport(app).contains("projectionWanted=true"))
+        output.onRouteRequested(true)
+        idle()
+        onSurface(replacement)
+        frameCallbacks.last()(replacement)
+        output.close() // Session close wins over the queued first-frame apply.
+        idle()
+        assertFalse(NavigationOutputs.diagnosticReport(app).contains("projectionWanted=true"))
+    }
+
+    @Test fun ordinaryDiagnosticsCoalesceWindowFailuresAndObserveRecovery() {
+        panels.close()
+        var fail = true
+        panels = mockConstruction(EcarxClusterPresentation::class.java) { panel, _ ->
+            if (fail) doThrow(IllegalStateException("private display name")).`when`(panel).show()
+        }
+        `when`(session.hasRenderedMainFrame).thenReturn(true)
+        output.onRouteRequested(true)
+        idle()
+        output.onSessionChanged()
+        idle()
+        assertEquals(1, events.count { "panel window show-failed" in it })
+        assertTrue(events.none { "private display name" in it })
+        fail = false
+        output.onSessionChanged()
+        idle()
+        assertEquals(1, events.count { "panel window shown" in it })
+    }
+
+    @Test fun ordinaryDiagnosticsObserveEachBindingOnceWithoutClaimingPhysicalDisplay() {
+        open()
+        events.clear()
+        repeat(3) {
+            output.onRouteRequested(true)
+            output.onSessionChanged()
+            idle()
+            frameCallbacks.last()(surface)
+        }
+        assertEquals(1, events.count { "panel video first-frame" in it })
+        assertTrue(events.single { "panel video first-frame" in it }.contains("physicalDisplay=unobserved"))
+        assertTrue(events.none { "panel intent" in it })
+
+        output.onRouteRequested(false)
+        idle()
+        output.onRouteRequested(true)
+        idle()
+        onSurface(surface)
+        frameCallbacks.first()(surface)
+        assertEquals(1, events.count { "panel video first-frame" in it })
+        val replacementSession = mock(AirPlaySession::class.java)
+        `when`(controller.activeAirPlaySession()).thenReturn(replacementSession)
+        frameCallbacks.last()(surface)
+        assertEquals(1, events.count { "panel video first-frame" in it })
+        `when`(controller.activeAirPlaySession()).thenReturn(session)
+        repeat(3) { frameCallbacks.last()(surface) }
+        assertEquals(2, events.count { "panel video first-frame" in it })
+        assertEquals(1, events.count { "panel surface attached" in it })
+        assertEquals(1, events.count { "panel surface detached" in it })
+        assertEquals(2, events.count { "panel intent" in it })
     }
 
     private fun open() {
