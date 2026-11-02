@@ -1,5 +1,9 @@
 # Hotspot automatic-join repair validation
 
+Historical report: this experimental feature and its dedicated helper/tests were
+removed on 2026-11-02. These results describe the earlier implementation. Current
+versions use the system hotspot controls and standard connection flow.
+
 This report separates software checks, observed device API behavior and
 end-to-end wireless CarPlay acceptance. See the
 [joining guide](WIRELESS_HOTSPOT_JOIN.md) for the repair workflow and the

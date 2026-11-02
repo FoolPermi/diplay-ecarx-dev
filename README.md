@@ -26,6 +26,8 @@ DiPlay 让你在领克车机上使用 iPhone 的导航、音乐、Siri 和通话
 
 建议首次使用无线配对。如果首次通过 USB 建立了本车的 CarPlay 记录，改用无线前须在 iPhone 的 CarPlay 设置中移除本车，再重新配对并先使用无线。车机 USB 连接仍有问题，USB 与无线切换及车机 USB 问题暂不继续排查。遇到异常，请到 **设置 → 诊断 → 保存诊断报告**。
 
+开发参考：[753 车机 ADB 依赖与平台权限清单](docs/ADB_AND_PLATFORM_PERMISSIONS.zh-CN.md)。
+
 基于 [DiPlay](https://github.com/shihabal3amri/DiPlay)、[DiPlay-ECARX](https://github.com/jiopia/DiPlay-ECARX) 和 [xcertplay](https://github.com/shilapi/xcertplay)，部分界面改编自 [DiAuto](https://github.com/shihabal3amri/DiAuto)。许可与第三方声明见 [LICENSE](LICENSE) 和 [相关说明](docs/THIRD_PARTY_NOTICES.md)。
 
 CarPlay 及相关标识属于 Apple；本项目与 Apple、领克、亿咖通无隶属或背书关系。

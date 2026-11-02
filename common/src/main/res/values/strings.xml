@@ -617,7 +617,7 @@
     <string name="auto_car_hotspot_title">Automatically turn on the car hotspot</string>
     <string name="auto_car_hotspot_description">Starts the saved car hotspot when DiPlay opens and before wireless CarPlay connects. If the hotspot is off and the car supports 5 GHz, it switches the saved band to 5 GHz first; an already-running hotspot keeps its band until it is turned off and on again. On Android 9, a failed start checks Wi-Fi and cycles it once before retrying. This can disconnect other Wi-Fi devices. Keeps the hotspot name and password. Enable the car-start option for boot startup.</string>
     <string name="settings_car_hotspot_config_title">Read the car hotspot</string>
-    <string name="settings_car_hotspot_config_description">Nothing to type: the car hotspot settings are imported; when the car has none, DiPlay writes its own details there after your confirmation, and devices using this hotspot may have to reconnect. Needs ADB on Android 11 and newer; not available on Android 8 to 10.</string>
+    <string name="settings_car_hotspot_config_description">Import the car hotspot details without typing them. If none can be read, DiPlay can write its own details after your confirmation; other devices may need to reconnect. The platform-signed Android 9 build uses system permissions without ADB. Android 11 and newer use ADB; Android 8 and 10 are unsupported.</string>
     <string name="settings_car_hotspot_config_unsupported">Importing the car hotspot details is not supported on this Android version.</string>
     <string name="settings_car_hotspot_config_written">The car hotspot now uses the DiPlay password.</string>
     <string name="settings_car_hotspot_config_imported">Car hotspot details saved for the next connection.</string>
@@ -865,7 +865,7 @@
     <string name="settings_navigation_attenuation_value">%1$d dB</string>
     <string name="settings_navigation_attenuation_description">Reduce CarPlay navigation guidance without changing music or call volume. Applies immediately; your head unit’s navigation volume still works.</string>
     <string name="settings_car_hotspot_control">Car hotspot</string>
-    <string name="settings_auto_car_hotspot_system_description">Turns on the saved hotspot when DiPlay opens or connects wirelessly. On supported head units, allow “Modify system settings” to start it without ADB. To start at boot, also enable “Open after the car starts”. DiPlay prefers 5 GHz when starting a hotspot, keeps the band of a running hotspot, and leaves it on when you exit.</string>
+    <string name="settings_auto_car_hotspot_system_description">Turns on the saved hotspot when DiPlay opens or connects wirelessly. Existing system hotspot permission is used directly; otherwise allow “Modify system settings”. ADB is optional. To start at boot, also enable “Open after the car starts”. DiPlay prefers 5 GHz when starting a hotspot, keeps the band of a running hotspot, and leaves it on when you exit.</string>
     <string name="settings_write_settings_granted">“Modify system settings” access: allowed</string>
     <string name="settings_write_settings_missing">“Modify system settings” access is not allowed yet. Allow it so DiPlay can turn on the hotspot.</string>
     <string name="settings_write_settings_allow">Allow access</string>

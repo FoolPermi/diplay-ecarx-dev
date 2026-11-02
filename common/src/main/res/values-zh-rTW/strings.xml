@@ -563,7 +563,7 @@
     <string name="auto_car_hotspot_title">自動開啟熱點</string>
     <string name="auto_car_hotspot_description">開啟 DiPlay 或連線無線 CarPlay 前啟動已儲存的車機熱點。熱點關閉且車機支援 5 GHz 時，會先將儲存的頻段切到 5 GHz；已開啟的熱點維持原頻段，等下次關閉再開啟後生效。Android 9 啟動失敗時，會檢查目前 Wi-Fi 狀態，重設後重試一次，可能中斷其他 Wi-Fi 裝置。熱點名稱與密碼不變；搭配車機啟動時開啟使用。</string>
     <string name="settings_car_hotspot_config_title">讀取原車熱點</string>
-    <string name="settings_car_hotspot_config_description">無需手動輸入熱點資訊，嘗試匯入車機熱點資訊；車機沒有熱點資訊時，在使用者確認後由 DiPlay 寫入自己的熱點詳情，使用此車載熱點的裝置可能需要重新連線。Android 11 及以上需要 ADB；Android 8 到 10 不支援。</string>
+    <string name="settings_car_hotspot_config_description">無需手動輸入，嘗試匯入車機熱點資訊。讀取不到時，可在確認後寫入 DiPlay 的熱點詳情，其他裝置可能需要重新連線。Android 9 平台簽名版直接使用系統權限，無需 ADB；Android 11 及以上使用 ADB，Android 8 和 10 不支援。</string>
     <string name="settings_car_hotspot_config_unsupported">此 Android 版本不支援匯入車機熱點詳細資訊。</string>
     <string name="settings_car_hotspot_config_written">車機熱點已使用 DiPlay 的密碼。</string>
     <string name="settings_car_hotspot_config_imported">已儲存原車熱點資訊，下次連線生效。</string>
@@ -823,7 +823,7 @@
     <string name="settings_navigation_attenuation_value">%1$d dB</string>
     <string name="settings_navigation_attenuation_description">只降低 CarPlay 導航提示音量，不影響音樂與通話。調整立即生效，仍可使用車機本身的導航音量。</string>
     <string name="settings_car_hotspot_control">車輛熱點</string>
-    <string name="settings_auto_car_hotspot_system_description">開啟 DiPlay 或連線無線 CarPlay 時，自動開啟已儲存的車機熱點。支援系統控制的車機只需允許「修改系統設定」。如需隨車啟動，請同時開啟「車輛啟動後開啟 DiPlay」。啟動前會在支援時優先選用 5 GHz；已開啟的熱點保留原頻段，離開時也會保持開啟。</string>
+    <string name="settings_auto_car_hotspot_system_description">開啟 DiPlay 或連線無線 CarPlay 時，自動開啟已儲存的車機熱點。已有系統熱點權限時直接使用，否則請允許「修改系統設定」，不強制開啟 ADB。如需隨車啟動，請同時開啟「車輛啟動後開啟 DiPlay」。啟動前會在支援時優先選用 5 GHz；已開啟的熱點保留原頻段，離開時也會保持開啟。</string>
     <string name="settings_write_settings_granted">「修改系統設定」權限：已允許</string>
     <string name="settings_write_settings_missing">尚未允許「修改系統設定」權限。請允許，讓 DiPlay 能開啟熱點。</string>
     <string name="settings_write_settings_allow">允許權限</string>

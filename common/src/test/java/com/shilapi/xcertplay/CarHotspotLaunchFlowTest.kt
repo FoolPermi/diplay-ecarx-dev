@@ -1,6 +1,10 @@
 package com.shilapi.xcertplay
 
 import android.os.Looper
+import android.net.ConnectivityManager
+import android.net.wifi.WifiManager
+import android.os.ResultReceiver
+import com.shilapi.xcertplay.network.ManualHotspotControl
 import com.shilapi.xcertplay.network.CarHotspotSettings
 import com.shilapi.xcertplay.network.CarHotspotTethering
 import com.shilapi.xcertplay.orchestration.WirelessHotspotMode
@@ -11,15 +15,70 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.Implementation
+import org.robolectric.annotation.Implements
 import org.robolectric.annotation.LooperMode
 import org.robolectric.util.ReflectionHelpers
+import java.io.File
+import java.lang.reflect.Proxy
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], qualifiers = "en-w1920dp-h1080dp-land-mdpi")
 @LooperMode(LooperMode.Mode.PAUSED)
 class CarHotspotLaunchFlowTest {
+    @Test @Config(shadows = [CarHotspotAdbGrantTest.WritePermission::class, PlatformApState::class])
+    fun platformPermissionStartsAndStopsWithoutWriteSettingsOrAdb() {
+        val app = RuntimeEnvironment.getApplication()
+        CarHotspotAdbGrantTest.WritePermission.allowed = false
+        PlatformApState.enabled = false
+        shadowOf(app).grantPermissions("android.permission.TETHER_PRIVILEGED")
+        val manager = app.getSystemService(ConnectivityManager::class.java)
+        val field = ConnectivityManager::class.java.getDeclaredField("mService").apply { isAccessible = true }
+        val original = field.get(manager)
+        var starts = 0
+        var stops = 0
+        val service = Proxy.newProxyInstance(field.type.classLoader, arrayOf(field.type)) { _, method, args ->
+            when (method.name) {
+                "startTethering" -> {
+                    starts++
+                    PlatformApState.enabled = true
+                    (args!![1] as ResultReceiver).send(0, null)
+                }
+                "stopTethering" -> {
+                    stops++
+                    PlatformApState.enabled = false
+                }
+            }
+            null
+        }
+        field.set(manager, service)
+        try {
+            assertTrue(CarHotspotTethering.permitted(app))
+            assertEquals(ManualHotspotControl.Capability.AVAILABLE, ManualHotspotControl(app).capability())
+            assertEquals(CarHotspotTethering.Result.READY, CarHotspotSetup.prepare(app, { false }, {}, {}))
+            assertEquals(ManualHotspotControl.Result.OFF, ManualHotspotControl(app).request(false) { false })
+            assertEquals(1, starts)
+            assertEquals(1, stops)
+            assertFalse("Startup must not load an ADB key", File(app.noBackupFilesDir, "adb").exists())
+            shadowOf(app).denyPermissions("android.permission.TETHER_PRIVILEGED")
+            assertFalse(CarHotspotTethering.permitted(app))
+            assertEquals(ManualHotspotControl.Capability.PERMISSION_REQUIRED, ManualHotspotControl(app).capability())
+        } finally {
+            field.set(manager, original)
+            shadowOf(app).denyPermissions("android.permission.TETHER_PRIVILEGED")
+        }
+    }
+
+    @Implements(WifiManager::class)
+    class PlatformApState {
+        @Implementation fun getWifiApState(): Int = if (enabled) 13 else 11
+        @Implementation fun isWifiApEnabled(): Boolean = enabled
+        companion object { var enabled = false }
+    }
+
     @Test fun firstConnectionJoinsLaunchPreparationAndContinuesWithoutAnotherStart() {
         val controller = Robolectric.buildActivity(DiPlayActivity::class.java).setup()
         val activity = controller.get()

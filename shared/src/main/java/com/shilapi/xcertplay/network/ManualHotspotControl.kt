@@ -6,7 +6,6 @@ import android.net.ConnectivityManager
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.ResultReceiver
-import android.provider.Settings
 import java.lang.reflect.InvocationTargetException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -204,7 +203,7 @@ class ManualHotspotControl @JvmOverloads internal constructor(
 
     private class AndroidPlatform(private val context: Context) : Platform {
         override val sdk get() = Build.VERSION.SDK_INT
-        override fun permitted() = Settings.System.canWrite(context)
+        override fun permitted() = CarHotspotTethering.permitted(context)
         override fun wifiPermitted() = context.checkSelfPermission(android.Manifest.permission.CHANGE_WIFI_STATE) ==
             PackageManager.PERMISSION_GRANTED
         override fun wifiState(): State = when (context.getSystemService(WifiManager::class.java)?.wifiState) {

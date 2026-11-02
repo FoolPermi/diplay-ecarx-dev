@@ -187,6 +187,7 @@ class SimplifiedSettingsUiTest {
             it.text.startsWith(activity.getString(R.string.settings_hotspot_more) + " · ")
         }.performClick()
         assertTrue(visible(modify))
+        screenshot(root, "connection-hotspot-expanded")
 
         val autoStart = views(root).filterIsInstance<android.widget.Switch>()
             .single { it.contentDescription == activity.getString(R.string.auto_car_hotspot_title) }
@@ -195,6 +196,17 @@ class SimplifiedSettingsUiTest {
         assertTrue(com.shilapi.xcertplay.network.CarHotspotSettings.enabled(activity))
         assertEquals(com.shilapi.xcertplay.network.CarHotspotTethering.Result.PERMISSION_REQUIRED,
             ReflectionHelpers.getField<com.shilapi.xcertplay.network.CarHotspotTethering.Result>(activity, "hotspotStartupResult"))
+    }
+
+    @Test @Config(sdk = [28, 33]) fun carHotspotOffersStandardControlsWithoutExperimentalRepair() {
+        AirPlayPersistence.saveWirelessHotspotMode(activity, com.shilapi.xcertplay.orchestration.WirelessHotspotMode.MANUAL)
+        val root = LinearLayout(activity)
+        ReflectionHelpers.callInstanceMethod<Unit>(activity, "wirelessLinkControls",
+            ReflectionHelpers.ClassParameter.from(LinearLayout::class.java, root))
+        assertTrue(hasTitle(root, R.string.settings_car_hotspot_config_title))
+        assertTrue(hasTitle(root, R.string.auto_car_hotspot_title))
+        assertTrue(hasTitle(root, R.string.settings_manual_hotspot_title))
+        assertFalse(views(root).filterIsInstance<TextView>().any { it.text == "自动加入热点（实验性）" })
     }
 
     private fun settings(category: SettingsCategory): LinearLayout {

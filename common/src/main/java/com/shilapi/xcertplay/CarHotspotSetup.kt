@@ -101,7 +101,7 @@ internal object CarHotspotSetup {
         HOTSPOT("WRITE_SETTINGS"), BOOT_LAUNCH("SYSTEM_ALERT_WINDOW");
 
         fun granted(context: Context): Boolean = when (this) {
-            HOTSPOT -> Settings.System.canWrite(context)
+            HOTSPOT -> CarHotspotTethering.permitted(context)
             BOOT_LAUNCH -> Settings.canDrawOverlays(context)
         }
     }

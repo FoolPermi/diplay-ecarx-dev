@@ -1,6 +1,7 @@
 package com.shilapi.xcertplay.network
 
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.ResultReceiver
 import android.provider.Settings
@@ -29,7 +30,9 @@ object CarHotspotTethering {
         CANCELLED("Hotspot startup was cancelled"),
     }
 
-    fun permitted(context: Context): Boolean = Settings.System.canWrite(context)
+    fun permitted(context: Context): Boolean =
+        context.checkSelfPermission("android.permission.TETHER_PRIVILEGED") == PackageManager.PERMISSION_GRANTED ||
+            Settings.System.canWrite(context)
 
     /** Whether this Android version lets an app with [permitted] access start tethering itself, without ADB. */
     fun appStartSupported(): Boolean = PlatformTetheringStart.supported()
@@ -103,7 +106,7 @@ object CarHotspotTethering {
             start = startReflection,
         ).also {
             if (it != Result.READY && it != Result.CANCELLED)
-                log("car hotspot: Android state=${CarHotspotStatus.isEnabled(context) ?: "unknown"} writeSettings=${permitted(context)}")
+                log("car hotspot: Android state=${CarHotspotStatus.isEnabled(context) ?: "unknown"} hotspotPermission=${permitted(context)}")
             log("car hotspot auto-enable: ${it.diagnostic}")
         }
     }

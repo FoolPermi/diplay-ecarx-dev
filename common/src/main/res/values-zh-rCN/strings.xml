@@ -579,7 +579,7 @@
     <string name="auto_car_hotspot_title">自动开启热点</string>
     <string name="auto_car_hotspot_description">打开 DiPlay 或连接无线 CarPlay 前启动已保存的车机热点。热点关闭且车机支持 5 GHz 时，会先把保存的频段切到 5 GHz；已开着的热点保持原频段，等下次关闭再开启后生效。Android 9 启动失败时，会检查当前 Wi-Fi 状态，重置后重试一次，可能断开其他 Wi-Fi 设备。热点名称和密码不变；配合车机启动时打开使用。</string>
     <string name="settings_car_hotspot_config_title">读取原车热点</string>
-    <string name="settings_car_hotspot_config_description">无需手动输入热点信息，尝试导入车机热点信息；车机没有热点信息时，在用户确认后由 DiPlay 写入自己的热点详情，使用此车载热点的设备可能需要重连。Android 11 及以上需要 ADB；Android 8 到 10 不支持。</string>
+    <string name="settings_car_hotspot_config_description">无需手动输入，尝试导入车机热点信息。读取不到时，可在确认后写入 DiPlay 的热点详情，其他设备可能需要重连。Android 9 平台签名版直接使用系统权限，无需 ADB；Android 11 及以上使用 ADB，Android 8 和 10 不支持。</string>
     <string name="settings_car_hotspot_config_unsupported">此 Android 版本不支持导入车机热点详情。</string>
     <string name="settings_car_hotspot_config_written">车机热点已使用 DiPlay 的密码。</string>
     <string name="settings_car_hotspot_config_imported">已保存原车热点信息，下次连接生效。</string>
@@ -823,7 +823,7 @@
     <string name="settings_navigation_attenuation_value">%1$d dB</string>
     <string name="settings_navigation_attenuation_description">仅降低 CarPlay 导航播报音量，不影响音乐和通话。调整立即生效，车机自身的导航音量仍可使用。</string>
     <string name="settings_car_hotspot_control">车辆热点</string>
-    <string name="settings_auto_car_hotspot_system_description">打开 DiPlay 或连接无线 CarPlay 时，自动开启已保存的车机热点。支持系统控制的车机只需允许“修改系统设置”。如需随车启动，请同时打开“车辆启动后打开 DiPlay”。启动前会在支持时优先选用 5 GHz；已开启的热点保持原频段，退出时也会保持开启。</string>
+    <string name="settings_auto_car_hotspot_system_description">打开 DiPlay 或连接无线 CarPlay 时，自动开启已保存的车机热点。已有系统热点权限时直接使用，否则请允许“修改系统设置”，不强制开启 ADB。如需随车启动，请同时打开“车辆启动后打开 DiPlay”。启动前会在支持时优先选用 5 GHz；已开启的热点保持原频段，退出时也会保持开启。</string>
     <string name="settings_write_settings_granted">“修改系统设置”权限：已允许</string>
     <string name="settings_write_settings_missing">尚未允许“修改系统设置”权限。请允许，以便 DiPlay 开启热点。</string>
     <string name="settings_write_settings_allow">允许权限</string>

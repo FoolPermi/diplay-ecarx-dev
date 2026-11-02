@@ -1,5 +1,11 @@
 # Automatic joining of a CarPlay hotspot
 
+The experimental ADB Check/Apply/Restore feature was removed on 2026-11-02.
+Use the system hotspot controls and standard Bluetooth/CarPlay connection flow.
+The repair sections below describe historical research, not a current app feature.
+If an older Android 13+ repair must be restored, use that version and its original
+private recovery backup; removing the feature does not rewrite device settings.
+
 An iPhone can receive usable hotspot credentials yet fail to join automatically.
 If it leaves its current Wi-Fi network, but selecting the receiver's hotspot
 manually starts CarPlay without a password prompt, distinguish that association
@@ -88,9 +94,9 @@ Older Android and vendor firmware need separate capability and permission
 validation. A privileged write accepted on this test phone is insufficient
 evidence for a general in-app fix.
 
-## Opt-in app repair
+## Historical opt-in app repair (removed)
 
-**Connection setup → Built-in car hotspot → Check hotspot repair** runs DiPlay's
+Older versions exposed **Connection setup → Built-in car hotspot → Check hotspot repair**, which ran DiPlay's
 authorized local-ADB/app_process helper. Opening the screen, resuming the app or
 starting CarPlay does not run this repair. Check reads the saved configuration
 and prepares a private full rollback snapshot; it does not change the hotspot.

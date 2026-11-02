@@ -193,7 +193,6 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     private var clusterSafeAreaDialog: Dialog? = null
     private var clusterContentRequestVersion = 0L
     private var pendingCarHotspotSetup = false
-    private var hotspotJoinControls: HotspotJoinControls? = null
     private var manualHotspotControls: ManualHotspotControls? = null
     private var hotspotProbeControls: HotspotProbeControls? = null
     private var hotspotProbeDialog: Dialog? = null
@@ -563,7 +562,6 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         appearanceObserverRemoval?.invoke()
         appearanceObserverRemoval = null
         handler.removeCallbacks(appearancePoll)
-        hotspotJoinControls?.close()
         manualHotspotControls?.close()
         hotspotProbeDialog?.dismiss()
         hotspotProbeControls?.close()
@@ -3064,12 +3062,6 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                         applyWirelessLink(WirelessHotspotMode.MANUAL)
                     }
                 }, matchButton(CONTROL_GAP_DP, CONTROL_HEIGHT_DP))
-                val join = hotspotJoinControls ?: HotspotJoinControls(this,
-                    { CarPlayBackgroundSession.hasSession() || carHotspotConfigBusy || hotspotStartupRunning },
-                    beforeAction = { startupHotspotCancelled = true },
-                    labelFactory = { label(it, 15, MUTED) }, buttonFactory = { title, click -> button(title, false, click) })
-                    .also { hotspotJoinControls = it }
-                more.addView(join.build())
             }
         } else if (mode == WirelessHotspotMode.EXISTING_WIFI) {
             parent.addView(label(getString(R.string.existing_wifi_instructions), 16, MUTED))
@@ -4905,7 +4897,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         appendLine("Startup settings: openAfterBoot=${AirPlayPersistence.loadAutoStartOnBoot(appContext)} " +
             "connectWhenOpened=${DiPlayPreferences.autoConnect(appContext)}")
         appendLine("Car hotspot control: autoEnable=${CarHotspotSettings.enabled(appContext)} " +
-            "writeSettings=${CarHotspotTethering.permitted(appContext)} " +
+            "hotspotPermission=${CarHotspotTethering.permitted(appContext)} " +
             "hotspotOn=${runCatching { com.shilapi.xcertplay.network.CarHotspotStatus.isEnabled(appContext) }.getOrNull()}")
         com.shilapi.xcertplay.network.ManualHotspotControl(appContext).let {
             appendLine("Manual hotspot: capability=${it.capability()} state=${it.observe()}")
