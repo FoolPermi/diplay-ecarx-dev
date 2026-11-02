@@ -668,7 +668,8 @@ public object CarBluetoothProfileGuard {
                 return
             }
             // The current phone can already have an older record from a previous session.
-            val order = addresses.filter { it != preferredAddress } + listOfNotNull(preferredAddress?.takeIf { it in addresses })
+            val preferred = addresses.firstOrNull { it.equals(preferredAddress, ignoreCase = true) }
+            val order = addresses.filter { it != preferred } + listOfNotNull(preferred)
             for (address in order.asReversed()) synchronized(lock) {
                 if (!current()) return
                 val device = remoteDevice(adapter, address) ?: return@synchronized

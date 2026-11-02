@@ -39,7 +39,7 @@ class BluetoothMediaYieldTest {
         ShadowBluetoothAdapter.setIsBluetoothSupported(true)
         adapter = BluetoothAdapter.getDefaultAdapter()
         shadowOf(adapter).setState(BluetoothAdapter.STATE_ON)
-        phone = adapter.getRemoteDevice("00:11:22:33:44:55")
+        phone = adapter.getRemoteDevice("AA:11:22:33:44:55")
         other = adapter.getRemoteDevice("00:11:22:33:44:66")
         shadowOf(adapter).setBondedDevices(setOf(phone, other))
         sink = Sink().apply { states[phone] = BluetoothProfile.STATE_CONNECTED }
@@ -478,7 +478,7 @@ class BluetoothMediaYieldTest {
         start()
         sink.states[other] = BluetoothProfile.STATE_CONNECTED
         start(other.address)
-        start(phone.address)
+        start(phone.address.lowercase())
         restore()
         assertEquals(listOf(phone), sink.connects)
         assertEquals(100, sink.getPriority(phone))
