@@ -8,11 +8,11 @@
 
 **本轮实现后，正式功能没有必须使用 ADB 的项目。** 应用内 ADB 客户端、密钥管理、5555 连接、ADB 授权流程及功能所用的 shell helper 均已删除。权限不足时明确失败、提供可用的系统设置入口或要求使用车机签名版本，不回退 ADB，也不要求先连接电脑或确认调试密钥。
 
-“代码不依赖 ADB”不等于“新权限已经在实车授予”。下表区分已留存的实车证据和本轮实现；新增声明及实际系统效果仍需在安装新包后回读并验收。
+2026-11-02 用户回传的实车权限检查截图已确认五项新增权限全部授予。下表区分 Manifest 授予、功能访问状态和实际系统调用效果；AppOps／无障碍启用、接口效果及完整重启仍需分别验收，见第 9 节。
 
 ## 2. 平台签名与 ADB 权限不能排成同一条大小关系
 
-本车历史记录显示，DiPlay 的签名与 `android` 平台包匹配，应用 UID 为 **10125**，并不是 shell UID 2000 或 system UID 1000。平台签名应用可以取得 shell 未必具备的签名权限；因此不能以普通第三方 APK 的权限上限判断本应用。
+本车历史记录显示，DiPlay 的签名与 `android` 平台包匹配，历史应用 UID 为 **10125**；本次实车截图显示 UID **10105**，平台签名仍匹配。两次记录均不是 shell UID 2000 或 system UID 1000，不据 UID 变化推断安装过程。平台签名应用可以取得 shell 未必具备的签名权限；因此不能以普通第三方 APK 的权限上限判断本应用。
 
 获得权限仍需要：Manifest 声明、签名与权限声明方匹配、安装时授予，以及固件允许该 UID 调用接口。AppOps、用户状态、组件状态、厂商 Binder 校验与 SELinux 仍可能影响调用结果。平台签名不是任意文件读写或任意命令执行授权。
 
@@ -69,17 +69,17 @@ BOOT_COMPLETED → BootReceiver 读取设置 → 请求打开 DiPlay
 
 可从应用诊断报告读取：`received`、`launchEnabledAtBoot`、`launchResult`、`failureClass`。`startActivity-returned` 只表示调用返回，不能单独证明页面已显示。
 
-## 6. 历史授予与本轮待回读权限
+## 6. 历史授予与本轮实车回读
 
 | 权限 | 已有材料 | 本轮状态 |
 | --- | --- | --- |
-| `WRITE_SETTINGS`、`SYSTEM_ALERT_WINDOW`、`PACKAGE_USAGE_STATS` | v104 实车 `granted=true` | 使用实际状态；不重新要求 ADB 授权 |
+| `WRITE_SETTINGS`、`SYSTEM_ALERT_WINDOW`、`PACKAGE_USAGE_STATS` | v104 实车 `granted=true`；本次截图也均已授予 | 悬浮窗实际访问已授予；使用情况访问仍显示未授予，需单独检查 AppOps |
 | `NETWORK_SETTINGS`、`TETHER_PRIVILEGED`、`OVERRIDE_WIFI_CONFIG` | v104 实车 `granted=true` | Android 9 热点直接路径已有基础 |
 | `BLUETOOTH_PRIVILEGED`、`CHANGE_COMPONENT_ENABLED_STATE`、`MEDIA_CONTENT_CONTROL`、车机 DIM 权限 | 历史实车已有授予 | 不以 ADB 可用性判定这些能力 |
 | `READ_LOGS` | 2026-11-01 实车记录 `granted=true` | 直接使用；缺失时提示签名版本 |
-| `WRITE_SECURE_SETTINGS` | 车机权限表存在，`signature|privileged|development` | 本轮新增 Manifest；安装新包后回读并验证设置写入／绑定 |
-| `MANAGE_APP_OPS_MODES` | 车机权限表存在，`signature|installer|verifier` | 本轮新增 Manifest；回读 AppOps 与实际访问状态 |
-| `CONNECTIVITY_INTERNAL`、`MANAGE_USB`、`CONTROL_VPN` | 车机权限表存在，`signature|privileged` | 本轮新增 Manifest；回读授予及各接口效果 |
+| `WRITE_SECURE_SETTINGS` | 车机权限表存在，`signature|privileged|development` | 本次实车截图已确认授予；设置写入与服务绑定效果待验证 |
+| `MANAGE_APP_OPS_MODES` | 车机权限表存在，`signature|installer|verifier` | 本次实车截图已确认授予；AppOps 设置后的实际访问待验证 |
+| `CONNECTIVITY_INTERNAL`、`MANAGE_USB`、`CONTROL_VPN` | 车机权限表存在，`signature|privileged` | 本次实车截图已确认全部授予；扫描、USB、VPN 接口效果待验证 |
 
 历史材料来自本地工作区 `logs/cap-v104-20261031-session1/boot-audit/package-details.txt` 和 `docs/实车验证记录-2026-11-01.md`，不随公开仓库分发。不将完整车机 dump、个人日志或签名资产加入仓库。
 
@@ -105,7 +105,7 @@ BOOT_COMPLETED → BootReceiver 读取设置 → 请求打开 DiPlay
 
 主机检查与 APK 内容核对结果记录在 issue #21；不把 Robolectric 或编译通过当成真机系统服务已授权。权限界面的 1920×1080 [自动化测试截图](screenshots/12-permission-check-android9-test.png)用于核对布局，其中 UID、签名和授权值属于测试环境。
 
-本轮验证包括仓库规定的 shared／common／home 单元测试、mobile／home／maphost／siribridge 的 Lint 与 Debug 构建；同时静态检查 APK ABI、新增权限声明和 ADB 客户端缺失。实车安装与重启验收待进行。按用户要求，rebase 后只补跑 4 个测试类共 13 项，全部通过，未重复全量单测。
+本轮验证包括仓库规定的 shared／common／home 单元测试、mobile／home／maphost／siribridge 的 Lint 与 Debug 构建；同时静态检查 APK ABI、新增权限声明和 ADB 客户端缺失。已收到实车权限检查截图，完整重启与功能调用验收待进行。按用户要求，rebase 后只补跑 4 个测试类共 13 项，全部通过，未重复全量单测。
 
 PR [#23](https://github.com/jianyun8023/diplay-ecarx/pull/23) 提交后，已从源码 `d18a1b58` 构建 **v114 Release**（`0.2-car-test-noadb-v114`，包名 `com.shihab.diplay`）。Release Lint、Android 9 验签、zipalign、ARM ABI、五项 API 28 权限声明及 ADB 客户端缺失检查通过，签名与认证输入均与 v113 一致。
 
@@ -115,10 +115,28 @@ PR [#23](https://github.com/jianyun8023/diplay-ecarx/pull/23) 提交后，已从
 
 待实车验收（安装本车平台签名的新包后，关闭网络调试；不先用电脑授权）：
 
-- [ ] 回读上述五项新声明的实际授予，并核对原有权限。
+- [x] 实车截图回读五项新增权限，记录可见的既有权限与功能访问状态。
 - [ ] 完整重启：分别记录广播、DiPlay 页面、热点和 CarPlay 连接结果；另测休眠唤醒。
 - [ ] USB／地图权限配置：首次启用、已有授权、缺失权限、取消，其他无障碍服务不丢失。
 - [ ] 方向盘服务：首次启用、崩溃恢复、应用更新、关闭与开机后的实际绑定。
 - [ ] Wi-Fi Direct：暂停、正常断开恢复、进程退出／重开恢复，不能只确认暂停成功。
 - [ ] 缺少 USB／VPN 授权页面时，确认平台接口实际生效；普通页面存在时仍可授权。
 - [ ] HY 后台日志按键与热点读写／启停，核对诊断报告，无调试授权提示。
+
+## 9. 2026-11-02 实车截图反馈
+
+证据来自用户提供的权限检查页面照片，仅转录可辨识状态。页面显示 UID **10105**、平台签名**匹配**；截图未显示应用版本、调试开关或具体启用操作的执行结果，不据此确认对应场景已经完成。
+
+| 检查项 | 截图结果 | 当前结论 |
+| --- | --- | --- |
+| 五项新增权限 | `WRITE_SECURE_SETTINGS`、`MANAGE_APP_OPS_MODES`、`MANAGE_USB`、`CONTROL_VPN`、`CONNECTIVITY_INTERNAL` 全部已授予 | 新声明的安装授予已由实车确认，直接系统调用具备相应权限前提 |
+| 热点、日志与车机权限 | `NETWORK_SETTINGS`、`OVERRIDE_WIFI_CONFIG`、`TETHER_PRIVILEGED`、`READ_LOGS`、DIM／媒体／导航等可见条目已授予 | 不应再按缺少这些 Manifest 权限要求 ADB |
+| 使用情况访问 | `PACKAGE_USAGE_STATS` 已授予，功能访问仍显示未授予 | 当前检查依赖 `GET_USAGE_STATS` AppOp 为 `MODE_ALLOWED`；Manifest 授予不能替代该检查 |
+| 无障碍与方向盘服务 | USB／方向盘无障碍授权显示未授予，方向盘服务未连接 | 仍须启用并确认实际绑定；用户不确定是否执行过启用，尚不能认定启用操作失败 |
+| 悬浮窗 | `SYSTEM_ALERT_WINDOW` 与功能访问均已授予 | 此次可确认悬浮窗访问检查通过 |
+| 存储 | `READ_EXTERNAL_STORAGE`、`WRITE_EXTERNAL_STORAGE` 未授予 | 与五项平台权限分开处理，按具体文件功能使用系统授权或文件选择器，不引入 ADB |
+| 较新 Android 权限 | `ACCESS_LOCAL_NETWORK`、`BLUETOOTH_CONNECT`、前台服务细分权限、`NEARBY_WIFI_DEVICES`、`POST_NOTIFICATIONS` 等显示系统未提供 | 符合本车 Android 9 范围，不作为缺权故障补授 |
+
+下一步使用应用现有入口验证：连接设置中的“设置 USB 与地图权限”，以及方向盘服务中的“启用方向盘按键服务”；随后回到权限检查点击“刷新”。若明确执行后仍未通过，记录页面提示并导出诊断报告，检查授权操作的 `verified`／`failed` 和方向盘服务绑定结果。权限检查页面本身只读，不会因打开或刷新自动启用功能。
+
+本次只更新文档与 issue／PR 的实车证据，不改应用代码、不重跑单测，也不重新构建 APK。完整重启、关闭调试后的自动连接及各原生接口效果继续保留为待验收项。
