@@ -555,20 +555,27 @@ class EcarxLaneGuidanceFlowTest {
     }
 
     @Test fun navigationDetailsFollowTheDebugSwitchWithoutStoppingOutput() {
+        NavigationOutputs.attachReport { reports += it }
         initialize()
         var debug = false
         NavigationOutputs.debugLogsEnabled = { debug }
         maneuver(); guidance()
         assertTrue(calls("updateNavigationInfo").isNotEmpty())
         assertFalse(reports.any { it.startsWith("DIM input") || it.startsWith("DIM publish") })
+        NavigationOutputs.requestPresentation(context, true, "surface ready")
+        assertTrue(reports.any { "reassert route=" in it && "nextMeters=" !in it })
         debug = true
         guidance(distance = 200)
+        NavigationOutputs.requestPresentation(context, true, "surface ready")
         assertTrue(reports.any { it.startsWith("DIM input") })
         assertTrue(reports.any { it.startsWith("DIM publish") })
+        assertTrue(reports.any { "reassert route=" in it && "nextMeters=200" in it })
         reports.clear()
         debug = false
         guidance(distance = 100)
+        repeat(10) { NavigationOutputs.requestPresentation(context, true, "surface ready") }
         assertFalse(reports.any { it.startsWith("DIM input") || it.startsWith("DIM publish") })
+        assertFalse(reports.any { "reassert route=" in it })
     }
 
     @Test fun unknownPlatformPolicyUsesDefaultIntentButWaitsForRouteAndSurface() {

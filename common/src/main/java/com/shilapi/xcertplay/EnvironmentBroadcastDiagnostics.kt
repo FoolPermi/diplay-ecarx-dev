@@ -68,6 +68,6 @@ internal object EnvironmentBroadcastDiagnostics {
     @Synchronized fun report(): String =
         "Environment broadcasts active=${context != null} status=$status received=$received retained=${events.size}\n" +
             "Scope: CarPlay session; ${if (hyMediaEnabled) 4 else 3} global actions; HY media=$hyMediaEnabled; sender unknown; no string values. " +
-            "Package-targeted/local broadcasts and MQTT are not observable here; silence does not prove inactivity.\n" +
+            "Package-targeted and local broadcasts are not observable here. See navigation mqtt lines for DIM broker observations.\n" +
             events.joinToString("\n")
 }

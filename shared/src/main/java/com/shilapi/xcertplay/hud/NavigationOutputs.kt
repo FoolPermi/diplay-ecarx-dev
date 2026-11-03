@@ -72,6 +72,7 @@ object NavigationOutputs {
         }
     }
 
+    private val mqtt = EcarxNavigationMqttObserver({ diagnostic(it) }, debugLogsEnabled = { debugLogsEnabled() })
     private val ecarx = NavigationOutputWorker("diplay-ecarx-output", EcarxHudBridge::clear)
 
     internal fun scopedClear(clear: () -> Unit = EcarxHudBridge::clear): () -> Unit {
@@ -98,6 +99,7 @@ object NavigationOutputs {
         useEcarx = EcarxCapabilities.detect(app).identified
         if (useEcarx) {
             ecarx.start(clear = scopedClear()) {
+                mqtt.start()
                 EcarxHudBridge.recoverFactoryNavigationIfIdle(app)
                 EcarxHudBridge.initialize(app)
                 EcarxHudBridge.setCurrentSession(currentSession)
@@ -114,7 +116,7 @@ object NavigationOutputs {
         return EcarxHudBridge.applyPresentation(show, origin).ok
     }
 
-    fun diagnosticReport(context: Context): String = EcarxHudBridge.diagnostics(context)
+    fun diagnosticReport(context: Context): String = EcarxHudBridge.diagnostics(context) + "\n" + mqtt.diagnosticReport()
 
     fun ecarxChanged() {
         if (useEcarx) ecarx.submit { EcarxHudBridge.settingsChanged() }
@@ -186,6 +188,6 @@ object NavigationOutputs {
         requestNavigationExit = null
         debugLogsEnabled = { false }
         currentSession = null
-        ecarx.clear(scopedClear())
+        ecarx.clear(scopedClear { try { EcarxHudBridge.clear() } finally { mqtt.stop() } })
     }
 }

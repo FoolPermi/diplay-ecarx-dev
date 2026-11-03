@@ -622,10 +622,14 @@ internal object EcarxHudBridge {
         val active = EcarxDimApi.updateMuteState(naviRef, lastPushed?.muteState ?: 0)
         pushLaneLocked(force = true)
         reassertCount++
-        val state = "map=$presentationWanted phase=${phase.name.lowercase()} ongoing=${outcome(active)} lanes=${lastLanePushed?.size ?: 0}"
-        if (state != lastReassertOutcome) {
+        val state = "route=$routeNumber map=$presentationWanted phase=${phase.name.lowercase()} ongoing=${outcome(active)} lanes=${lastLanePushed?.size ?: 0}"
+        val debug = NavigationOutputs.debugLogsEnabled()
+        if (state != lastReassertOutcome || debug) {
             lastReassertOutcome = state
-            NavigationOutputs.diagnostic("route=$routeNumber reassert $state")
+            val pushed = lastPushed
+            val detail = if (debug) " arrowId=${pushed?.turnId} nextMeters=${pushed?.distanceToNextMeters} " +
+                "roadPresent=${!pushed?.nextGuidancePointName.isNullOrEmpty()}" else ""
+            NavigationOutputs.diagnostic("reassert $state$detail")
         }
     }
 

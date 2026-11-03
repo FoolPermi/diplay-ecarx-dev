@@ -4877,6 +4877,9 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         appendLine(CarPlayMediaSession.diagnosticReport())
         appendLine(SystemMediaSessionDiagnostics.report(appContext))
         appendLine("Cluster output: " + CarPlayBackgroundSession.clusterDiagnostics(CarPlayBackgroundSession.snapshot()?.controller))
+        if (com.shilapi.xcertplay.hud.EcarxCapabilities.detect(appContext).identified) {
+            appendLine(NavigationOutputs.diagnosticReport(appContext))
+        }
         appendLine(CarPlayMediaSession.artworkDiagnosticReport())
         appendLine(AudioDiagnosticSnapshot.report(appContext))
         appendLine(runCatching {
