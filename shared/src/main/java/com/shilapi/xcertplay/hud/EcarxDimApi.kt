@@ -8,7 +8,8 @@ import com.ecarx.xui.adaptapi.diminteraction.INaviInteraction
 import java.lang.reflect.Modifier
 
 /**
- * Compile-only AdaptAPI access. The head unit supplies every vendor class at runtime.
+ * AdaptAPI access and cache-bypassing recovery through the firmware navigation manager.
+ * The head unit supplies every vendor class at runtime.
  * Calls retain diagnostic failures, including missing classes or methods on other firmware.
  * A successful void call means dispatch only; it does not prove the cluster changed.
  */
@@ -45,7 +46,7 @@ internal object EcarxDimApi {
         val turnId: Int = 0,
         val distanceToNextMeters: Long = -1,
         val distanceToDestinationMeters: Long = -1,
-        val etaEpochSeconds: Long = -1,
+        val etaRemainingSeconds: Int = -1,
         val drivingDirection: Int = 0,
         val status: Int = 0,
         val muteState: Int = 0,
@@ -113,7 +114,7 @@ internal object EcarxDimApi {
             override fun getNavigationTurnId() = guidance.turnId
             override fun getDistanceToNextGuidancePoint() = guidance.distanceToNextMeters.coerceAtLeast(0L)
             override fun getDistanceToDestination() = guidance.distanceToDestinationMeters.coerceAtLeast(0L)
-            override fun getETA() = guidance.etaEpochSeconds.coerceAtLeast(0L)
+            override fun getETA() = guidance.etaRemainingSeconds.coerceAtLeast(0).toLong()
             override fun getDrivingDirection() = guidance.drivingDirection
             override fun getNavigationStatus() = guidance.status
             override fun getMuteState() = guidance.muteState
@@ -131,6 +132,42 @@ internal object EcarxDimApi {
 
     fun updateTurnByTurnArrow(navi: NaviHandle, arrow: Int): EcarxResult = dispatch("updateTurnByTurnArrow($arrow)") {
         navi.api.updateTurnByTurnArrow(arrow)
+    }
+
+    /** Recovery must bypass AdaptAPI caches, which are updated before its swallowed Binder errors. */
+    fun refreshNavigation(guidance: Guidance, destination: String): EcarxResult {
+        val manager = runCatching {
+            Class.forName("android.cevt.dimsupportservice.DimSupportManager")
+                .getMethod("getNavigationManager").invoke(null)
+        }.getOrElse { return EcarxResult.failed("manager=${describe(it)}") }
+            ?: return EcarxResult.failed("manager=unavailable")
+        val type = manager.javaClass
+        val intType = Int::class.javaPrimitiveType!!
+        val boolType = Boolean::class.javaPrimitiveType!!
+        val details = mutableListOf<String>()
+        var accepted = true
+        fun send(label: String, method: String, types: Array<Class<*>>, vararg args: Any) {
+            val result = dispatch(method) { type.getMethod(method, *types).invoke(manager, *args) }
+            accepted = accepted && result.ok
+            details += "$label=${if (result.ok) "returned" else result.reason}"
+        }
+        send("ongoing", "updateOngoingNavigation",
+            arrayOf(boolType, String::class.java, boolType),
+            guidance.status == NAVIGATION_SNAPSHOT_ACTIVE, destination, guidance.muteState == 1)
+        if (guidance.distanceToNextMeters in 0L..Int.MAX_VALUE.toLong()) {
+            send("next", "updateTurnByTurnNextTurn", arrayOf(intType, String::class.java),
+                guidance.distanceToNextMeters.toInt(), guidance.nextGuidancePointName)
+        }
+        if (guidance.distanceToDestinationMeters in 0L..Int.MAX_VALUE.toLong()) {
+            send("distance", "updateDistanceToDestination", arrayOf(intType), guidance.distanceToDestinationMeters.toInt())
+        }
+        if (guidance.etaRemainingSeconds >= 0) {
+            send("eta", "updateEta", arrayOf(intType), guidance.etaRemainingSeconds)
+        }
+        if (guidance.turnId > 0) {
+            send("arrow", "updateTurnByTurnIcon", arrayOf(intType, String::class.java), 0, guidance.turnId.toString())
+        }
+        return EcarxResult(accepted, details.joinToString(" "))
     }
 
     /** The String overload is the SVG channel used by the factory navigation app. */
@@ -160,8 +197,8 @@ internal object EcarxDimApi {
         navi.api.updateDistanceToDestination(meters.toInt())
     }
 
-    fun updateEta(navi: NaviHandle, epochSeconds: Long): EcarxResult = dispatch("updateETA(${epochSeconds.toInt()})") {
-        navi.api.updateETA(epochSeconds.toInt())
+    fun updateEta(navi: NaviHandle, remainingSeconds: Int): EcarxResult = dispatch("updateETA($remainingSeconds)") {
+        navi.api.updateETA(remainingSeconds)
     }
 
     fun updateNextGuidancePointName(navi: NaviHandle, name: String): EcarxResult = dispatch("updateNextGuidancePointName") {
@@ -229,26 +266,6 @@ internal object EcarxDimApi {
     }.getOrElse {
         report("DIMProtocolManager.getInstance failed: ${describe(it)}")
         null
-    }
-
-    /** Firmware framework entry points forward straight to DIM without AdaptAPI's value cache. */
-    fun replayTurn(id: Int?, svg: String?, meters: Int, road: String): String {
-        val manager = runCatching {
-            Class.forName("android.cevt.dimsupportservice.DimSupportManager").getMethod("getNavigationManager").invoke(null)
-        }.getOrElse { return "manager=${it.javaClass.simpleName}" } ?: return "manager=unavailable"
-        val type = manager.javaClass
-        val icon = id?.toString() ?: svg
-        val arrow = icon?.let {
-            runCatching {
-                type.getMethod("updateTurnByTurnIcon", Int::class.javaPrimitiveType, String::class.java)
-                    .invoke(manager, if (id != null) 0 else 1, it)
-            }.exceptionOrNull()?.let { error -> (error.cause ?: error).javaClass.simpleName } ?: "sent"
-        } ?: "skipped"
-        val next = runCatching {
-            type.getMethod("updateTurnByTurnNextTurn", Int::class.javaPrimitiveType, String::class.java)
-                .invoke(manager, meters, road)
-        }.exceptionOrNull()?.let { (it.cause ?: it).javaClass.simpleName } ?: "sent"
-        return "icon=$arrow nextTurn=$next"
     }
 
     private inline fun dispatch(label: String, action: () -> Unit): EcarxResult = runCatching { action() }

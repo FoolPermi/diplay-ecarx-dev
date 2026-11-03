@@ -3994,8 +3994,19 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         ecarxSwKeyHandle = null
     }
 
-    /** The optional desktop copy is independent of automatic instrument guidance. */
+    /** Guidance output and initial instrument-map visibility are independent choices. */
     private fun ecarxNavigationOutputs(card: LinearLayout) {
+        toggle(card, getString(R.string.ecarx_navigation_on_instrument_cluster),
+            getString(R.string.ecarx_navigation_on_instrument_cluster_description),
+            EcarxOutputSettings.enabled(this)) {
+            EcarxOutputSettings.setEnabled(this, it)
+            NavigationOutputs.ecarxChanged()
+        }
+        toggle(card, getString(R.string.ecarx_instrument_cluster_projection),
+            getString(R.string.ecarx_instrument_cluster_projection_description),
+            EcarxOutputSettings.autoShowMap(this)) {
+            EcarxOutputSettings.setAutoShowMap(this, it)
+        }
         toggle(card, getString(R.string.center_map_follows_dashboard),
             getString(R.string.center_map_follows_dashboard_description),
             AirPlayPersistence.loadCenterMapOverlay(this) && AirPlayPersistence.loadCenterMapFollowsDashboard(this)) { on ->

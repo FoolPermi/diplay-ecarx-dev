@@ -1,6 +1,8 @@
 package com.ecarx.xui.adaptapi.diminteraction;
 
 import android.graphics.Bitmap;
+import android.os.RemoteException;
+import android.cevt.dimsupportservice.DimSupportManager;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -13,6 +15,8 @@ public class NaviFixture implements INaviInteraction {
     public boolean resendOngoing;
     public boolean navigationMute;
     public String destinationName = "";
+    public int cachedArrowId = -1;
+    public String cachedArrowSvg = "";
     public final List<Boolean> ongoingTransitions = new ArrayList<>();
     public final List<String> navigationEvents = new ArrayList<>();
 
@@ -37,6 +41,10 @@ public class NaviFixture implements INaviInteraction {
             "getRoadCameraInfo", i.getRoadCameraInfo(), "getServiceAreaInfo", i.getServiceAreaInfo());
         // Match the recovered SDK's deduplication and one-shot resend, independently of DIM state.
         boolean active = i.getNavigationStatus() == 1;
+        if (!active) {
+            cachedArrowId = -1;
+            cachedArrowSvg = "";
+        }
         boolean mute = i.getMuteState() == 1;
         if (active != ongoingNavigationActive || mute != navigationMute || (resendOngoing && active)) {
             ongoingNavigationActive = active;
@@ -46,12 +54,33 @@ public class NaviFixture implements INaviInteraction {
             ongoingTransitions.add(active);
         }
     }
-    public void updateTurnByTurnArrow(int arrow) { FixtureLog.capture("updateTurnByTurnArrow(int)", "arrow", arrow); }
-    public void updateTurnByTurnArrow(String svg) { FixtureLog.capture("updateTurnByTurnArrow(String)", "svg", svg); }
+    public void updateTurnByTurnArrow(int arrow) {
+        FixtureLog.capture("updateTurnByTurnArrow(int)", "arrow", arrow);
+        if (cachedArrowId != arrow) {
+            cachedArrowId = arrow;
+            cachedArrowSvg = "";
+            sendIcon(0, String.valueOf(arrow));
+        }
+    }
+    public void updateTurnByTurnArrow(String svg) {
+        FixtureLog.capture("updateTurnByTurnArrow(String)", "svg", svg);
+        if (cachedArrowSvg != svg) {
+            cachedArrowSvg = svg;
+            cachedArrowId = -1;
+            sendIcon(1, svg);
+        }
+    }
+    private void sendIcon(int type, String value) {
+        try {
+            DimSupportManager.getNavigationManager().updateTurnByTurnIcon(type, value);
+        } catch (RemoteException ignored) {
+            // Match the shipped SDK: the cache is not rolled back and the caller sees no error.
+        }
+    }
     public void updateTurnByTurnArrow(Bitmap bitmap) { FixtureLog.capture("updateTurnByTurnArrow(Bitmap)", "bitmap", bitmap); }
     public void updateDistanceToNextGuidancePoint(int meters) { FixtureLog.capture("updateDistanceToNextGuidancePoint", "meters", meters); }
     public void updateDistanceToDestination(int meters) { FixtureLog.capture("updateDistanceToDestination", "meters", meters); }
-    public void updateETA(int epochSeconds) { FixtureLog.capture("updateETA", "epochSeconds", epochSeconds); }
+    public void updateETA(int remainingSeconds) { FixtureLog.capture("updateETA", "remainingSeconds", remainingSeconds); }
     public void updateNextGuidancePointName(String name) { FixtureLog.capture("updateNextGuidancePointName", "name", name); }
     public void updateAddresses(int type, List<IAddress> addresses) {
         // Type 3 deliberately never reads coordinates or caches selectable addresses on 753.

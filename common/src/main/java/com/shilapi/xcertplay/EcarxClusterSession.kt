@@ -136,8 +136,6 @@ internal class EcarxClusterSession(
         presentation = null
         onSurface(null)
         val dismissed = runCatching { panel.dismiss() }
-        if (dismissed.isSuccess && !panel.isShowing && !closed && !wanted && outputSession != null &&
-            controller.activeAirPlaySession() === outputSession) NavigationOutputs.onClusterWindowHidden()
         log("window dismiss-return accepted=${dismissed.isSuccess} showing=${panel.isShowing} source=session-owner")
     }
 

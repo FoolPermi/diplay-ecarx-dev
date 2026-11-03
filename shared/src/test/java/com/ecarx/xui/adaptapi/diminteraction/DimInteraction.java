@@ -24,6 +24,7 @@ public final class DimInteraction {
         return nullCreate ? null : INSTANCE;
     }
     public static void reset() {
+        android.cevt.dimsupportservice.DimSupportManager.reset();
         nullCreate = nullMedia = nullNavi = nullPhone = false;
         requireMainLooper = false;
         failPresentation = false;
@@ -34,6 +35,8 @@ public final class DimInteraction {
         navi.handlerNavigationActive = false;
         navi.resendOngoing = false;
         navi.navigationMute = false;
+        navi.cachedArrowId = -1;
+        navi.cachedArrowSvg = "";
         navi.ongoingTransitions.clear();
         navi.navigationEvents.clear();
         FixtureLog.reset();
