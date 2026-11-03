@@ -2,9 +2,11 @@ package com.shilapi.xcertplay.hud
 
 import android.content.Context
 
-/** Media/mirror preferences and crash recovery; navigation and lanes follow the session automatically. */
+/** Independent guidance output, initial map visibility, media/mirror preferences and crash recovery. */
 object EcarxOutputSettings {
     private const val PREFS = "diplay_ecarx_outputs_v2"
+    private const val KEY_ENABLED = "dim_navigation_enabled"
+    private const val KEY_AUTO_SHOW_MAP = "dim_auto_show_map_on_guidance"
     private const val KEY_LEGACY_PRESENTATION = "dim_presentation_switch"
     private const val KEY_PRESENTATION_RELEASE_PENDING = "dim_presentation_release_pending"
     private const val KEY_MIRROR_MAIN = "dim_mirror_main_screen"
@@ -21,6 +23,22 @@ object EcarxOutputSettings {
      * gone so the driver can never land on one again.
      */
     const val PRESENTATION_PACKAGE = ""
+
+    fun enabled(context: Context): Boolean = prefs(context).getBoolean(KEY_ENABLED, true)
+
+    fun setEnabled(context: Context, enabled: Boolean) {
+        check(prefs(context).edit().putBoolean(KEY_ENABLED, enabled).commit()) {
+            "Could not persist the ECARX navigation output setting"
+        }
+    }
+
+    fun autoShowMap(context: Context): Boolean = prefs(context).getBoolean(KEY_AUTO_SHOW_MAP, true)
+
+    fun setAutoShowMap(context: Context, enabled: Boolean) {
+        check(prefs(context).edit().putBoolean(KEY_AUTO_SHOW_MAP, enabled).commit()) {
+            "Could not persist the ECARX initial map visibility setting"
+        }
+    }
 
     /** An old "on" may own a platform window; it no longer controls this process's display intent. */
     internal fun retirePresentationSwitch(context: Context) {

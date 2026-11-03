@@ -104,8 +104,8 @@ object NavigationOutputs {
     }
 
     /**
-     * The session window owns runtime delivery. OEM callbacks own this process's display intent;
-     * acceptance does not prove the instrument panel is displaying it.
+     * The window reports source readiness; detaching pauses retries without terminating an active
+     * navigation app. OEM callbacks own display intent. Acceptance does not prove physical display.
      */
     fun requestPresentation(context: Context, show: Boolean, origin: String = ""): Boolean {
         EcarxHudBridge.initialize(context)
@@ -113,6 +113,10 @@ object NavigationOutputs {
     }
 
     fun diagnosticReport(context: Context): String = EcarxHudBridge.diagnostics(context)
+
+    fun ecarxChanged() {
+        if (useEcarx) ecarx.submit { EcarxHudBridge.settingsChanged() }
+    }
 
     /**
      * Routes the cluster bridges' own lines into the session report. Called once the session log

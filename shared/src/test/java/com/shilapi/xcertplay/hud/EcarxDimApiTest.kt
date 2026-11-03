@@ -72,6 +72,15 @@ class EcarxDimApiTest {
         assertEquals("", target.destinationName)
     }
 
+    @Test fun etaUsesRemainingSecondsInBothTheSnapshotAndSingleField() {
+        val navi = EcarxDimApi.NaviHandle(NaviFixture())
+        assertTrue(EcarxDimApi.updateNavigationInfo(navi,
+            EcarxDimApi.Guidance(etaRemainingSeconds = 600)).ok)
+        assertTrue(EcarxDimApi.updateEta(navi, 600).ok)
+        assertEquals(600L, FixtureLog.calls().single { it.method == "updateNavigationInfo" }.payload["getETA"])
+        assertEquals(600, FixtureLog.calls().single { it.method == "updateETA" }.payload["remainingSeconds"])
+    }
+
     @Test fun lifecycleNotificationsUseSdkEventsRatherThanSnapshotValues() {
         val navi = EcarxDimApi.NaviHandle(NaviWithStatus())
         assertEquals(1, EcarxDimApi.NAVIGATION_SNAPSHOT_ACTIVE)

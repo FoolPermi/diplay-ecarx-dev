@@ -852,13 +852,13 @@
     <string name="settings_hotspot_interface_description">僅用於把熱點放在 Android 不認為是 Wi-Fi 熱點的網路介面上的車機，例如部分吉利、領克及其它高通車機上的 eth0.3。留空則自動尋找。</string>
     <string name="ecarx_cluster_call_rejected">車機拒絕了這次呼叫：需要系統簽章且已授予 DIM 權限。</string>
     <string name="ecarx_cluster_mirror_confirm">開啟後會把整個中央螢幕鏡像到儀表，並蓋住儀表上的導航箭頭與媒體卡片。\n\n確定要開啟嗎？</string>
-    <string name="ecarx_instrument_cluster_projection">在儀表顯示導航地圖</string>
-    <string name="ecarx_instrument_cluster_projection_description">導航時顯示獨立的 CarPlay 儀表地圖。關閉只隱藏儀表地圖，手機導航繼續執行。立即生效。</string>
+    <string name="ecarx_instrument_cluster_projection">開始導航時自動顯示儀表地圖</string>
+    <string name="ecarx_instrument_cluster_projection_description">設定每條新路線開始時是否顯示儀表地圖，儀表上的顯隱操作優先。變更從下一條路線生效。</string>
     <string name="ecarx_media_on_instrument_cluster">儀表媒體卡片</string>
     <string name="ecarx_media_on_instrument_cluster_description">透過億咖通 ECARX MediaCenter 輸出媒體資訊，與導航獨立，需要相容韌體及權限。</string>
     <string name="ecarx_navigation">億咖通導航</string>
-    <string name="ecarx_navigation_on_instrument_cluster">儀表導航</string>
-    <string name="ecarx_navigation_on_instrument_cluster_description">在儀表上顯示 CarPlay 轉向、距離、預計到達時間與路名。引導期間暫停原廠導航服務；753 車機的原廠桌面導航卡片可能需要手動重新加入。</string>
+    <string name="ecarx_navigation_on_instrument_cluster">HUD／儀表導航提示</string>
+    <string name="ecarx_navigation_on_instrument_cluster_description">顯示 CarPlay 轉向、距離、路名、預計到達時間與車道指引，與儀表地圖分別控制，立即生效。引導期間暫停原廠導航服務；753 車機的原廠桌面導航卡片可能需要手動重新加入。</string>
     <string name="ecarx_sw_key_action_answer">接聽電話</string>
     <string name="ecarx_sw_key_action_hangup">掛斷電話</string>
     <string name="ecarx_sw_key_action_next">下一曲</string>

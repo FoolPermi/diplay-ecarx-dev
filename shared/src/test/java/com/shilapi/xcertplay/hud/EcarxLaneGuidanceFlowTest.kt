@@ -65,6 +65,7 @@ class EcarxLaneGuidanceFlowTest {
     private var nowNs = 1_000_000_000L
     private lateinit var route: RouteGuidanceState
     private var originalClock: Any? = null
+    private var originalEpochClock: Any? = null
 
     private fun field(name: String) = EcarxHudBridge.javaClass.getDeclaredField(name).apply { isAccessible = true }
     private fun set(name: String, value: Any?) = field(name).set(EcarxHudBridge, value)
@@ -89,7 +90,7 @@ class EcarxLaneGuidanceFlowTest {
         DimInteraction.reset()
         for (name in listOf("context", "dim", "navi", "protocol", "dimCallback", "naviCallback",
             "lastPushed", "lastArrowChannel", "presentedPackage", "lanes", "lastLanePushed")) set(name, null)
-        for (name in listOf("ecarxDetected", "presentationWanted", "releaseStalePresentation", "clusterVisibleWanted", "guidanceActive")) set(name, false)
+        for (name in listOf("ecarxDetected", "presentationWanted", "releaseStalePresentation", "clusterVisibleWanted", "guidanceActive", "hudActive")) set(name, false)
         for (name in listOf("presentationOption", "presentationCountdown", "presentationAttempts", "ticksSincePush")) set(name, 0)
         // Only the scheduler is suppressed: tests explicitly run the production tick below.
         set("tickerStarted", true)
@@ -97,6 +98,7 @@ class EcarxLaneGuidanceFlowTest {
         route.clear()
         val clock = route.javaClass.getDeclaredField("nanoTime").apply { isAccessible = true }
         originalClock = clock.get(route)
+        originalEpochClock = field("epochSeconds").get(EcarxHudBridge)
         clock.set(route, { nowNs })
         context.getSharedPreferences("diplay_ecarx_outputs_v2", Context.MODE_PRIVATE).edit().clear().commit()
         context.getSharedPreferences("diplay_factory_navigation_control", Context.MODE_PRIVATE).edit().clear().commit()
@@ -117,15 +119,16 @@ class EcarxLaneGuidanceFlowTest {
         manager.unregisterDisplayListener(field("displayWatch").get(EcarxHudBridge) as DisplayManager.DisplayListener)
         set("displayWatchRegistered", false)
         route.javaClass.getDeclaredField("nanoTime").apply { isAccessible = true }.set(route, originalClock)
+        set("epochSeconds", originalEpochClock)
         set("context", null)
         set("tickerStarted", false)
         EcarxHudBridge.attachReport {}
         DimInteraction.reset()
     }
 
-    @Test fun laneFramesAutomaticallyReachTypedDimArrayDespiteLegacyDisabledPreferences() {
+    @Test fun laneFramesReachTypedDimArrayDespiteLegacyLanePreference() {
         context.getSharedPreferences("diplay_ecarx_outputs_v2", Context.MODE_PRIVATE).edit()
-            .putBoolean("dim_navigation_enabled", false).putBoolean("dim_lane_guidance_enabled", false).commit()
+            .putBoolean("dim_lane_guidance_enabled", false).commit()
         val frame = Iap2Frame(0x5204, hex(
             "00 06 00 00 00 2a 00 06 00 01 00 00" +
                 " 00 15 00 02 00 06 00 00 00 00 00 05 00 01 00 00 06 00 02 ff a6" +
@@ -168,6 +171,181 @@ class EcarxLaneGuidanceFlowTest {
         NavigationOutputs.endNow()
         awaitOutputWorker()
         assertNull(calls("updateLaneInfo").last().payload["lanes"])
+    }
+
+    @Test fun etaNormalizesDurationTimestampAndRemainingTimeWithoutKeepaliveDrift() {
+        initialize()
+        for (mode in 0..3) {
+            set("epochSeconds", originalEpochClock)
+            maneuver()
+            send(0x5201) {
+                u8(1, 1); u16List(0x0d, listOf(7)); u32(0x0a, 350)
+                when (mode) {
+                    0 -> u64(5, 600)
+                    1 -> u64(5, System.currentTimeMillis() / 1000 + 600)
+                    2 -> u64(6, 600)
+                    else -> { u64(5, 0); u64(6, 600) }
+                }
+            }
+            val snapshot = calls("updateNavigationInfo").last().payload["getETA"] as Long
+            val separate = calls("updateETA").last().payload["remainingSeconds"] as Int
+            assertTrue("mode=$mode eta=$snapshot", snapshot in 598L..600L)
+            assertEquals(snapshot.toInt(), separate)
+            val arrival = route.arrivalEpochSeconds
+            var wallSeconds = System.currentTimeMillis() / 1000
+            set("epochSeconds", { wallSeconds })
+            wallSeconds += 10
+            repeat(5) { tick() }
+            assertEquals(arrival, route.arrivalEpochSeconds)
+            val refreshed = calls("updateETA").last().payload["remainingSeconds"] as Int
+            assertTrue("mode=$mode refreshed=$refreshed", refreshed in 588..590)
+            send(0x5201) { u8(1, 0) }
+        }
+    }
+
+    @Test fun turnGapKeepsPublishingDestinationRemainingDistanceAndEtaWithoutFakeNextDistance() {
+        installFactoryNavigation(); initialize(); maneuver(); guidance()
+        val nextWrites = calls("updateDistanceToNextGuidancePoint").size
+        send(0x5201) {
+            u16List(0x0d, listOf(8)); u32(7, 6543); u64(6, 300); string(4, "新的目的地")
+        }
+        assertNull(route.currentForDim())
+        assertTrue(EcarxHudBridge.isActive())
+        assertTrue(DimInteraction.navi.handlerNavigationActive)
+        assertEquals(nextWrites, calls("updateDistanceToNextGuidancePoint").size)
+        assertEquals(6543, calls("updateDistanceToDestination").last().payload["meters"])
+        assertTrue((calls("updateETA").last().payload["remainingSeconds"] as Int) in 298..300)
+        assertEquals("新的目的地", DimInteraction.navi.destinationName)
+        assertTrue(calls("notifyTurnByTurnStopped").isEmpty())
+        assertEquals(PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER,
+            context.packageManager.getApplicationEnabledSetting(FACTORY_PACKAGE))
+    }
+
+    @Test fun disablingHudDuringATurnGapStillWithdrawsItsOutputAndCanResume() {
+        initialize(); maneuver(); guidance()
+        send(0x5201) { u16List(0x0d, listOf(8)); u16(0x10, 2); u8(0x12, 1) }
+        assertNull(field("lastPushed").get(EcarxHudBridge))
+        assertTrue(field("hudActive").getBoolean(EcarxHudBridge))
+        val panels = panelRequests.toList()
+        EcarxOutputSettings.setEnabled(context, false)
+        EcarxHudBridge.settingsChanged()
+        assertTrue(EcarxHudBridge.isActive())
+        assertFalse(DimInteraction.navi.ongoingNavigationActive)
+        assertFalse(field("hudActive").getBoolean(EcarxHudBridge))
+        send(0x5204) {
+            u16(0, 42); u16(1, 2); group(2) { u16(0, 0); u8(1, 2); i16(2, -90) }
+        }
+        EcarxOutputSettings.setEnabled(context, true)
+        EcarxHudBridge.settingsChanged()
+        maneuver(index = 8)
+        send(0x5201) { u32(0x0a, 150) }
+        assertTrue(DimInteraction.navi.ongoingNavigationActive)
+        assertEquals(150, calls("updateDistanceToNextGuidancePoint").last().payload["meters"])
+        val lanes = calls("updateLaneInfo").last().payload["lanes"] as List<*>
+        assertEquals(16, (lanes.single() as Map<*, *>)["iconId"])
+        assertEquals(panels, panelRequests.toList())
+    }
+
+    @Test fun startupResidueWaitsUntilTheCurrentRouteEndsBeforeClosingTheNavigationApp() {
+        EcarxOutputSettings.setPresentationReleasePending(context, true)
+        initialize(); maneuver(); guidance()
+        repeat(12) { tick() }
+        assertTrue(calls("setPresentationToDimSwitch").isEmpty())
+        assertTrue(EcarxOutputSettings.presentationReleasePending(context))
+        assertTrue(EcarxHudBridge.isActive())
+        send(0x5201) { u8(1, 0) }
+        assertEquals(listOf(false), calls("setPresentationToDimSwitch").map { it.payload["show"] })
+        assertFalse(EcarxOutputSettings.presentationReleasePending(context))
+    }
+
+    @Test fun hudCanBeDisabledWhileTheMapAndInstrumentExitRemainAvailable() {
+        installFactoryNavigation()
+        EcarxOutputSettings.setEnabled(context, false)
+        initialize(); maneuver(); guidance()
+        assertTrue(panelRequests.last())
+        assertTrue(calls("updateNavigationInfo").isEmpty())
+        assertTrue(calls("updateTurnByTurnArrow(int)").isEmpty())
+        assertNotNull(route.current())
+        NavigationOutputs.onAppOpened(context)
+        assertEquals(PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER,
+            context.packageManager.getApplicationEnabledSetting(FACTORY_PACKAGE))
+        var exits = 0
+        NavigationOutputs.requestNavigationExit = { exits++; true }
+        DimInteraction.navi.callback.onDoInteractionAction(2, null)
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(1, exits)
+        assertNotNull(route.current())
+        assertTrue(panelRequests.last())
+        send(0x5201) { u8(1, 0) }
+        assertNull(route.current())
+        assertFalse(panelRequests.last())
+        assertFactoryRestored()
+    }
+
+    @Test fun hudToggleKeepsTheRouteMapAndLatestLaneData() {
+        initialize()
+        send(0x5204) {
+            u16(0, 42); u16(1, 0); group(2) { u16(0, 0); u8(1, 2); i16(2, -90) }
+        }
+        maneuver()
+        send(0x5201) {
+            u8(1, 6); u16List(0x0d, listOf(7)); u32(0x0a, 90); u16(0x10, 0); u8(0x12, 1)
+        }
+        val panels = panelRequests.toList()
+        val lanes = calls("updateLaneInfo").last().payload["lanes"]
+        assertNotNull(lanes)
+        EcarxOutputSettings.setEnabled(context, false)
+        EcarxHudBridge.settingsChanged()
+        assertTrue(EcarxHudBridge.isActive())
+        assertFalse(field("hudActive").getBoolean(EcarxHudBridge))
+        assertNull(calls("updateLaneInfo").last().payload["lanes"])
+        val count = calls("updateNavigationInfo").size
+        guidance(distance = 120)
+        repeat(5) { tick() }
+        assertEquals(count, calls("updateNavigationInfo").size)
+        assertEquals(120, route.current()!!.distanceMeters)
+        assertEquals(panels, panelRequests.toList())
+        EcarxOutputSettings.setEnabled(context, true)
+        EcarxHudBridge.settingsChanged()
+        assertTrue(EcarxHudBridge.isActive())
+        assertEquals(120L, calls("updateNavigationInfo").last().payload["getDistanceToNextGuidancePoint"])
+        assertEquals(lanes, calls("updateLaneInfo").last().payload["lanes"])
+        assertEquals(panels, panelRequests.toList())
+    }
+
+    @Test fun automaticMapChoiceAppliesAtRouteStartAndOemVisibilityStillWins() {
+        EcarxOutputSettings.setAutoShowMap(context, false)
+        initialize(); maneuver(); guidance()
+        assertTrue(EcarxHudBridge.isActive())
+        assertFalse(panelRequests.last())
+        DimInteraction.instance().callback.onShowPresentationOptionChanged(1)
+        shadowOf(Looper.getMainLooper()).idle()
+        assertFalse(panelRequests.last())
+        EcarxOutputSettings.setAutoShowMap(context, true)
+        EcarxHudBridge.settingsChanged()
+        DimInteraction.instance().callback.onShowPresentationOptionChanged(1)
+        shadowOf(Looper.getMainLooper()).idle()
+        guidance(distance = 200)
+        assertFalse(panelRequests.last())
+        send(0x5201) { u8(1, 0) }
+        maneuver(); guidance()
+        assertTrue(panelRequests.last())
+        DimInteraction.instance().callback.onShowPresentationOptionChanged(3)
+        shadowOf(Looper.getMainLooper()).idle()
+        guidance(distance = 100)
+        assertFalse(panelRequests.last())
+        assertTrue(EcarxHudBridge.isActive())
+        assertEquals(100L, calls("updateNavigationInfo").last().payload["getDistanceToNextGuidancePoint"])
+        DimInteraction.instance().callback.onShowPresentationOptionChanged(2)
+        shadowOf(Looper.getMainLooper()).idle()
+        assertTrue(panelRequests.last())
+        EcarxOutputSettings.setAutoShowMap(context, false)
+        send(0x5201) { u8(1, 0) }
+        maneuver(); guidance()
+        assertTrue(panelRequests.last())
+        assertFalse(EcarxOutputSettings.autoShowMap(context))
+        EcarxHudBridge.clear()
+        assertFalse(panelRequests.last())
     }
 
     @Test fun hiddenLanesStayCachedUntilThePhoneShowsThemAgain() {
@@ -509,8 +687,10 @@ class EcarxLaneGuidanceFlowTest {
         assertTrue(calls("setPresentationToDimSwitch").isNotEmpty())
         assertTrue(calls("setPresentationToDimSwitch").all { it.payload["show"] == true })
         NavigationOutputs.requestPresentation(context, false, "cluster surface detached")
-        assertFalse(EcarxOutputSettings.presentationReleasePending(context))
+        assertTrue(EcarxOutputSettings.presentationReleasePending(context))
         assertTrue("Window cleanup must not erase the user choice", field("clusterVisibleWanted").getBoolean(EcarxHudBridge))
+        send(0x5201) { u8(1, 0) }
+        assertFalse(EcarxOutputSettings.presentationReleasePending(context))
     }
 
     @Test fun currentFailedCloseCancelsStartupRetriesButPreservesResidueForNextLaunch() {
@@ -561,12 +741,12 @@ class EcarxLaneGuidanceFlowTest {
         assertEquals(true, calls("setPresentationToDimSwitch").last().payload["show"])
     }
 
-    @Test fun aFailedReleaseClearsRuntimeRetriesButKeepsTheUserChoice() {
+    @Test fun surfaceDetachStopsRetriesEvenWhenTheDimHandleIsUnavailable() {
         initialize(); maneuver(); guidance()
         set("dim", null)
         DimInteraction.nullCreate = true
         assertTrue(NavigationOutputs.requestPresentation(context, true, "cluster surface ready"))
-        assertFalse(NavigationOutputs.requestPresentation(context, false, "cluster surface detached"))
+        assertTrue(NavigationOutputs.requestPresentation(context, false, "cluster surface detached"))
         assertTrue(field("clusterVisibleWanted").getBoolean(EcarxHudBridge))
         DimInteraction.nullCreate = false
         repeat(12) { tick() }
@@ -587,7 +767,13 @@ class EcarxLaneGuidanceFlowTest {
             assertFalse(DimInteraction.navi.resendOngoing)
             DimInteraction.instance().callback.onShowPresentationOptionChanged(3)
             shadowOf(Looper.getMainLooper()).idle()
+            val switches = calls("setPresentationToDimSwitch").size
+            val publications = calls("updateNavigationInfo").size
+            val events = DimInteraction.navi.navigationEvents.toList()
             assertTrue(NavigationOutputs.requestPresentation(context, false, "surface detached"))
+            assertEquals(switches, calls("setPresentationToDimSwitch").size)
+            assertEquals(publications, calls("updateNavigationInfo").size)
+            assertEquals(events, DimInteraction.navi.navigationEvents)
             assertFalse(panelRequests.last())
             assertTrue(EcarxHudBridge.isActive())
             assertTrue(DimInteraction.navi.ongoingNavigationActive)

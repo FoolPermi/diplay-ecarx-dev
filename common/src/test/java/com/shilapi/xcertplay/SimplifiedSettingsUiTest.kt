@@ -100,13 +100,15 @@ class SimplifiedSettingsUiTest {
         assertTrue(hasTitle(advanced, R.string.settings_ecarx_cluster_safe_area))
         val navigation = settings(SettingsCategory.NAVIGATION)
         assertTrue(hasTitle(navigation, R.string.center_map_follows_dashboard))
-        assertFalse(hasTitle(navigation, R.string.ecarx_navigation_on_instrument_cluster))
+        assertTrue(hasTitle(navigation, R.string.ecarx_navigation_on_instrument_cluster))
+        assertFalse(hasTitle(advanced, R.string.ecarx_navigation_on_instrument_cluster))
         assertFalse(hasTitle(navigation, R.string.settings_ecarx_lane_guidance))
         assertFalse(hasTitle(navigation, R.string.settings_ecarx_cluster_safe_area))
         assertFalse(hasTitle(navigation, R.string.settings_ecarx_cluster_mirror_main))
-        assertFalse(hasTitle(navigation, R.string.ecarx_instrument_cluster_projection))
+        assertTrue(hasTitle(navigation, R.string.ecarx_instrument_cluster_projection))
+        assertFalse(hasTitle(advanced, R.string.ecarx_instrument_cluster_projection))
         screenshot(advanced, "advanced-cluster-mirror")
-        screenshot(navigation, "navigation-auto-cluster")
+        screenshot(navigation, "navigation-output-controls")
         assertFalse(hasTitle(advanced, R.string.settings_harman_fullscreen_experimental))
         assertFalse(hasTitle(settings(SettingsCategory.CONNECTION), R.string.mfi_certificate_signing_target))
         val quick = LinearLayout(activity)
@@ -114,6 +116,26 @@ class SimplifiedSettingsUiTest {
             ReflectionHelpers.ClassParameter.from(LinearLayout::class.java, quick))
         assertFalse(hasTitle(quick, R.string.report_location_to_iphone))
         assertTrue(hasTitle(settings(SettingsCategory.NAVIGATION), R.string.report_location_to_iphone))
+    }
+
+    @Test fun navigationOutputSwitchesSaveIndependentChoices() {
+        val root = settings(SettingsCategory.NAVIGATION)
+        val controls = views(root).filterIsInstance<android.widget.Switch>().toList()
+        val hud = controls.single { it.contentDescription == activity.getString(R.string.ecarx_navigation_on_instrument_cluster) }
+        val map = controls.single { it.contentDescription == activity.getString(R.string.ecarx_instrument_cluster_projection) }
+        assertTrue(hud.isChecked)
+        assertTrue(map.isChecked)
+        hud.performClick()
+        assertFalse(com.shilapi.xcertplay.hud.EcarxOutputSettings.enabled(activity))
+        assertTrue(com.shilapi.xcertplay.hud.EcarxOutputSettings.autoShowMap(activity))
+        map.performClick()
+        assertFalse(com.shilapi.xcertplay.hud.EcarxOutputSettings.autoShowMap(activity))
+        hud.performClick()
+        assertTrue(com.shilapi.xcertplay.hud.EcarxOutputSettings.enabled(activity))
+        assertFalse(com.shilapi.xcertplay.hud.EcarxOutputSettings.autoShowMap(activity))
+        val rebuilt = views(settings(SettingsCategory.NAVIGATION)).filterIsInstance<android.widget.Switch>().toList()
+        assertTrue(rebuilt.single { it.contentDescription == hud.contentDescription }.isChecked)
+        assertFalse(rebuilt.single { it.contentDescription == map.contentDescription }.isChecked)
     }
 
     @Test @Config(sdk = [28]) fun carHotspotBootSwitchSavesWithoutAdb() {

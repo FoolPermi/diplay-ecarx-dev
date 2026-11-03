@@ -68,10 +68,12 @@ internal class RouteGuidanceState(
     private var distanceKnown = false
     private var distanceMeters = 0
     private var currentRoad = ""
-    private var arrivalEpochSeconds: Long? = null
+    var arrivalEpochSeconds: Long? = null
+        private set
     private var etaRawSeconds: Long? = null
     private var remainingSeconds: Long? = null
-    private var remainingMeters: Long? = null
+    var remainingMeters: Long? = null
+        private set
     private var emptyListSinceNs: Long? = null
     private var lastRouteUpdateNs: Long? = null
     private var endReason = "not-started"
@@ -170,24 +172,27 @@ internal class RouteGuidanceState(
         var distance: Int? = null
         var firstManeuver: Int? = null
         var listPresent = false
+        var etaPresent = false
+        var remainingPresent = false
         forEachTlv(data) { type, value, valueLength ->
             when {
                 type == 0x01 && valueLength >= 1 -> state = data[value].toInt() and 0xff
                 type == 0x03 -> currentRoad = utf8(data, value, valueLength)
                 type == 0x04 -> destinationName = utf8(data, value, valueLength).takeUnless { it == "未知位置" }.orEmpty()
-                // Apple's 0x05 is not always an absolute timestamp: this phone sends the time
-                // *remaining*. Handing that straight to the head unit made it render a 41-minute
-                // remainder as the clock time "24:41", because it formats whatever integer it
-                // receives. A value below 2001-09-09 cannot be a timestamp, so treat those as a
-                // duration and convert once, here, where the phone's intent is still known.
+                // 0x05 can be an arrival epoch or seconds remaining. Anchor an arrival time once;
+                // widgets use the timestamp and the DIM output derives a countdown from it.
                 type == 0x05 && valueLength >= 8 -> {
+                    etaPresent = true
                     val raw = u64(data, value).takeIf { it > 0 }
                     etaRawSeconds = raw
                     arrivalEpochSeconds = raw?.let {
                         if (it >= EPOCH_FLOOR_SECONDS) it else System.currentTimeMillis() / 1000 + it
                     }
                 }
-                type == 0x06 && valueLength >= 8 -> remainingSeconds = u64(data, value).takeIf { it >= 0 }
+                type == 0x06 && valueLength >= 8 -> {
+                    remainingPresent = true
+                    remainingSeconds = u64(data, value).takeIf { it >= 0 }
+                }
                 type == 0x07 && valueLength >= 4 -> remainingMeters = u32(data, value)
                 type == 0x0a && valueLength >= 4 -> {
                     distance = u32(data, value).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
@@ -201,6 +206,10 @@ internal class RouteGuidanceState(
             }
         }
 
+        // Anchor duration-only updates once so keepalives do not move the arrival time forward.
+        if (remainingPresent && (!etaPresent || arrivalEpochSeconds == null)) {
+            arrivalEpochSeconds = remainingSeconds?.let { System.currentTimeMillis() / 1000 + it }
+        }
         inputState = state
         if (state != null) {
             lastPhoneState = state

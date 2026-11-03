@@ -45,7 +45,7 @@ internal object EcarxDimApi {
         val turnId: Int = 0,
         val distanceToNextMeters: Long = -1,
         val distanceToDestinationMeters: Long = -1,
-        val etaEpochSeconds: Long = -1,
+        val etaRemainingSeconds: Int = -1,
         val drivingDirection: Int = 0,
         val status: Int = 0,
         val muteState: Int = 0,
@@ -113,7 +113,7 @@ internal object EcarxDimApi {
             override fun getNavigationTurnId() = guidance.turnId
             override fun getDistanceToNextGuidancePoint() = guidance.distanceToNextMeters.coerceAtLeast(0L)
             override fun getDistanceToDestination() = guidance.distanceToDestinationMeters.coerceAtLeast(0L)
-            override fun getETA() = guidance.etaEpochSeconds.coerceAtLeast(0L)
+            override fun getETA() = guidance.etaRemainingSeconds.coerceAtLeast(0).toLong()
             override fun getDrivingDirection() = guidance.drivingDirection
             override fun getNavigationStatus() = guidance.status
             override fun getMuteState() = guidance.muteState
@@ -160,8 +160,8 @@ internal object EcarxDimApi {
         navi.api.updateDistanceToDestination(meters.toInt())
     }
 
-    fun updateEta(navi: NaviHandle, epochSeconds: Long): EcarxResult = dispatch("updateETA(${epochSeconds.toInt()})") {
-        navi.api.updateETA(epochSeconds.toInt())
+    fun updateEta(navi: NaviHandle, remainingSeconds: Int): EcarxResult = dispatch("updateETA($remainingSeconds)") {
+        navi.api.updateETA(remainingSeconds)
     }
 
     fun updateNextGuidancePointName(navi: NaviHandle, name: String): EcarxResult = dispatch("updateNextGuidancePointName") {

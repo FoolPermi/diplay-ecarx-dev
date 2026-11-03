@@ -16,7 +16,7 @@ public interface INaviInteraction {
     void updateTurnByTurnArrow(Bitmap bitmap);
     void updateDistanceToNextGuidancePoint(int meters);
     void updateDistanceToDestination(int meters);
-    void updateETA(int epochSeconds);
+    void updateETA(int remainingSeconds);
     void updateNextGuidancePointName(String name);
     void updateAddresses(int type, List<IAddress> addresses);
     void updateLaneInfo(ILaneInfo[] lanes);

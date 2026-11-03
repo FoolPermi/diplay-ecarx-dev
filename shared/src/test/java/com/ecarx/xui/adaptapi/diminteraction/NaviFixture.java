@@ -51,7 +51,7 @@ public class NaviFixture implements INaviInteraction {
     public void updateTurnByTurnArrow(Bitmap bitmap) { FixtureLog.capture("updateTurnByTurnArrow(Bitmap)", "bitmap", bitmap); }
     public void updateDistanceToNextGuidancePoint(int meters) { FixtureLog.capture("updateDistanceToNextGuidancePoint", "meters", meters); }
     public void updateDistanceToDestination(int meters) { FixtureLog.capture("updateDistanceToDestination", "meters", meters); }
-    public void updateETA(int epochSeconds) { FixtureLog.capture("updateETA", "epochSeconds", epochSeconds); }
+    public void updateETA(int remainingSeconds) { FixtureLog.capture("updateETA", "remainingSeconds", remainingSeconds); }
     public void updateNextGuidancePointName(String name) { FixtureLog.capture("updateNextGuidancePointName", "name", name); }
     public void updateAddresses(int type, List<IAddress> addresses) {
         // Type 3 deliberately never reads coordinates or caches selectable addresses on 753.
