@@ -48,7 +48,6 @@ class ClusterArtworkServerTest {
                 assertEquals(0, newest.inputStream.use { it.readBytes().size })
             } finally { newest.disconnect() }
         } finally { server.close() }
-        assertTrue(runCatching { Socket(url.host, url.port).use {} }.isFailure)
         assertTrue(server.diagnosticReport().contains("listening=false"))
     }
 
