@@ -29,10 +29,10 @@ import java.lang.reflect.Proxy
 @Config(sdk = [28], qualifiers = "en-w1920dp-h1080dp-land-mdpi")
 @LooperMode(LooperMode.Mode.PAUSED)
 class CarHotspotLaunchFlowTest {
-    @Test @Config(shadows = [CarHotspotAdbGrantTest.WritePermission::class, PlatformApState::class])
+    @Test @Config(shadows = [HotspotWritePermissionShadow::class, PlatformApState::class])
     fun platformPermissionStartsAndStopsWithoutWriteSettingsOrAdb() {
         val app = RuntimeEnvironment.getApplication()
-        CarHotspotAdbGrantTest.WritePermission.allowed = false
+        HotspotWritePermissionShadow.allowed = false
         PlatformApState.enabled = false
         shadowOf(app).grantPermissions("android.permission.TETHER_PRIVILEGED")
         val manager = app.getSystemService(ConnectivityManager::class.java)

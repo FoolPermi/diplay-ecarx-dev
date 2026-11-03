@@ -3,3 +3,11 @@ plugins {
     alias(libs.plugins.android.application) apply false
     alias(libs.plugins.kotlin.compose) apply false
 }
+// Vehicle packages support ARM only, including native libraries from dependencies.
+subprojects {
+    plugins.withId("com.android.application") {
+        extensions.configure<com.android.build.api.dsl.ApplicationExtension> {
+            defaultConfig.ndk.abiFilters += setOf("arm64-v8a", "armeabi-v7a")
+        }
+    }
+}

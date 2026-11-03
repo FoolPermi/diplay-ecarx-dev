@@ -54,6 +54,15 @@ class CarPlayConnectionDiagnosticLogTest {
         assertFalse(log.contains("private-token"))
     }
 
+    @Test fun sessionStartupIncludesPermissionGrantsAndRawUsageAppOp() {
+        val sessionLog = activity.javaClass.getDeclaredField("sessionLog").apply { isAccessible = true }
+            .get(activity) as SessionLogFile
+        assertTrue(sessionLog.awaitIdle(2_000))
+        assertTrue(log.contains("Permissions: Platform signature check="))
+        assertTrue(log.contains("Permissions: USB setup permissions:"))
+        assertTrue(log.contains("Permissions: Usage access AppOps: GET_USAGE_STATS mode="))
+    }
+
     @Test fun playbackRecoverySurvivesOldGenerationAndOpenMenuWithRedaction() {
         activity.javaClass.getDeclaredField("menuOpen").apply { isAccessible = true }.set(activity, true)
         listener.onDebugLog("Playback recovery session=7 monotonicNs=123 nowPlaying previousMs=207000 elapsedMs=207")

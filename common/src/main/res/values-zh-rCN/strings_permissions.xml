@@ -1,0 +1,21 @@
+<resources>
+    <string name="settings_permission_check">权限检查</string>
+    <string name="settings_permission_refresh">刷新</string>
+    <string name="settings_permission_uid">应用 UID：%1$d</string>
+    <string name="settings_permission_signature">平台签名</string>
+    <string name="settings_permission_signature_match">匹配</string>
+    <string name="settings_permission_signature_mismatch">不匹配</string>
+    <string name="settings_permission_access">功能访问状态</string>
+    <string name="settings_permission_manifest">应用声明的权限</string>
+    <string name="settings_permission_granted">已授予</string>
+    <string name="settings_permission_denied">未授予</string>
+    <string name="settings_permission_unavailable">系统未提供</string>
+    <string name="settings_permission_unknown">无法读取</string>
+    <string name="settings_permission_usage">使用情况访问</string>
+    <string name="settings_permission_overlay">悬浮窗</string>
+    <string name="settings_permission_usb_service">USB 无障碍授权</string>
+    <string name="settings_permission_wheel_service">方向盘无障碍授权</string>
+    <string name="settings_permission_wheel_connection">方向盘服务</string>
+    <string name="settings_permission_connected">已连接</string>
+    <string name="settings_permission_disconnected">未连接</string>
+</resources>

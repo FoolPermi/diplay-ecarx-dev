@@ -12,15 +12,15 @@ import org.robolectric.annotation.Config
 import com.shilapi.xcertplay.network.CarHotspotConfigWrite.Result
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [29], manifest = Config.NONE)
+@Config(sdk = [28], manifest = Config.NONE)
 class CarHotspotConfigWriteTest {
     private val logs = mutableListOf<String>()
     private fun log(message: String) { logs += message }
     private val credentials = HotspotCredentials("DiPlay", "password1", ManualHotspotSecurity.WPA2)
 
     @Test fun androidNineUsesTheVerifiedAppConfigurationPath() {
-        listOf(23, 24, 26, 27, 29).forEach { assertFalse(CarHotspotConfigWrite.supported(it)) }
-        listOf(25, 28, 30, 31, 33, 35).forEach { assertTrue(CarHotspotConfigWrite.supported(it)) }
+        listOf(23, 24, 25, 26, 27, 29, 30, 31, 33, 35).forEach { assertFalse(CarHotspotConfigWrite.supported(it)) }
+        listOf(28).forEach { assertTrue(CarHotspotConfigWrite.supported(it)) }
     }
 
     @Test @Config(sdk = [28]) fun androidNineCanRenameWhilePreservingTheOriginalRadioConfiguration() {
@@ -67,14 +67,14 @@ class CarHotspotConfigWriteTest {
 
     @Test fun wpa3IsNeverDowngraded() {
         assertEquals(CarHotspotConfigWrite.WriteOutcome(Result.SKIPPED), CarHotspotConfigWrite.write(RuntimeEnvironment.getApplication(),
-            credentials.copy(security = ManualHotspotSecurity.WPA3), sdk = 25, log = ::log))
+            credentials.copy(security = ManualHotspotSecurity.WPA3), sdk = 28, log = ::log))
     }
 
     @Test fun credentialsWithLineBreaksAreSkipped() {
         assertEquals(CarHotspotConfigWrite.WriteOutcome(Result.SKIPPED), CarHotspotConfigWrite.write(RuntimeEnvironment.getApplication(),
-            credentials.copy(passphrase = "pass\nword"), sdk = 25, log = ::log))
+            credentials.copy(passphrase = "pass\nword"), sdk = 28, log = ::log))
         assertEquals(CarHotspotConfigWrite.WriteOutcome(Result.SKIPPED), CarHotspotConfigWrite.write(RuntimeEnvironment.getApplication(),
-            credentials.copy(ssid = "car\rhotspot"), sdk = 30, log = ::log))
+            credentials.copy(ssid = "car\rhotspot"), sdk = 28, log = ::log))
     }
 
     @Test fun writeAppliesRawSsidAndWpa2Credentials() {
@@ -174,21 +174,6 @@ class CarHotspotConfigWriteTest {
         assertTrue(logs.last().contains("app write failed"))
     }
 
-    @Test fun shellWriteAcceptsTheHelperOkLine() {
-        var command: String? = null
-        var stdin: ByteArray? = null
-        assertEquals(CarHotspotConfigWrite.WriteOutcome(Result.WRITTEN, "Car-Original"), CarHotspotConfigWrite.writeAdb(
-            { sent, _, pushed -> command = sent; stdin = pushed;
-                "noise\nDIPLAY_HOTSPOT_APCONFIG_V1|ok|Q2FyLU9yaWdpbmFs\n" },
-            "/data/app/diplay.apk", credentials, 4_000, ::log))
-        command!!.let {
-            assertTrue(it.contains("app_process /system/bin com.shilapi.xcertplay.network.CarHotspotStartMain"))
-            assertTrue(it.contains(" apconfig "))
-            assertTrue(it.contains(" 'DiPlay' AUTO"))
-            assertFalse(it.contains("password1"))
-        }
-        assertEquals("9\npassword1", String(stdin!!, Charsets.UTF_8))
-    }
 
     @Test fun anOpenWriteIsRejectedWhenTheCarHasAPassword() {
         val secured = WifiConfiguration().apply { SSID = "Car-Original"; preSharedKey = "carpass" }
@@ -227,57 +212,11 @@ class CarHotspotConfigWriteTest {
         assertTrue(CarHotspotConfigWrite.isSecured(wpa2))
     }
 
-    @Test fun shellWriteRefusesToStripTheCarPassword() {
-        assertEquals(CarHotspotConfigWrite.WriteOutcome(Result.OPEN_REJECTED), CarHotspotConfigWrite.writeAdb(
-            { _, _, _ -> "DIPLAY_HOTSPOT_APCONFIG_V1|error open" }, "", credentials, 4_000, ::log))
-    }
 
-    @Test fun shellWriteRejectsFailuresAndSilence() {
-        assertEquals(CarHotspotConfigWrite.WriteOutcome(Result.FAILED), CarHotspotConfigWrite.writeAdb(
-            { _, _, _ -> "DIPLAY_HOTSPOT_APCONFIG_V1|error rejected" }, "", credentials, 4_000, ::log))
-        assertEquals(CarHotspotConfigWrite.WriteOutcome(Result.FAILED), CarHotspotConfigWrite.writeAdb(
-            { _, _, _ -> null }, "", credentials, 4_000, ::log))
-        assertTrue(logs.last().contains("no reply"))
-    }
 
-    @Test fun shellWriteAcceptsAnOkLineWithoutASsid() {
-        assertEquals(CarHotspotConfigWrite.WriteOutcome(Result.WRITTEN, null), CarHotspotConfigWrite.writeAdb(
-            { _, _, _ -> "DIPLAY_HOTSPOT_APCONFIG_V1|ok" }, "", credentials, 4_000, ::log))
-    }
 
-    @Test fun parsesTheApconfigProtocolLine() {
-        assertEquals("ok|Car-Original",
-            CarHotspotStartMain.parseApConfig("x\nDIPLAY_HOTSPOT_APCONFIG_V1|ok|Car-Original\nmore"))
-        assertEquals("error rejected", CarHotspotStartMain.parseApConfig("DIPLAY_HOTSPOT_APCONFIG_V1|error rejected"))
-        assertNull(CarHotspotStartMain.parseApConfig("nothing"))
-        assertNull(CarHotspotStartMain.parseApConfig(null))
-    }
 
-    @Test fun readsTheSavedSsidFromTheHelperReply() {
-        assertEquals("Car-Original", CarHotspotStartMain.apConfigSsid("ok|Q2FyLU9yaWdpbmFs"))
-        assertNull(CarHotspotStartMain.apConfigSsid("ok"))
-        assertNull(CarHotspotStartMain.apConfigSsid("ok|"))
-        assertNull(CarHotspotStartMain.apConfigSsid("ok|Car-Original"))
-        assertNull(CarHotspotStartMain.apConfigSsid("error rejected"))
-        assertNull(CarHotspotStartMain.apConfigSsid(null))
-        assertEquals("pass|word", CarHotspotStartMain.apConfigPassphrase("ok|Q2Fy|cGFzc3x3b3Jk|1"))
-        assertEquals("", CarHotspotStartMain.apConfigPassphrase("ok|Q2Fy"))
-        assertEquals("", CarHotspotStartMain.apConfigPassphrase("ok|Q2Fy||1"))
-        assertEquals(1, CarHotspotStartMain.apConfigSecurity("ok|Q2Fy|cGFzc3x3b3Jk|1"))
-        assertNull(CarHotspotStartMain.apConfigSecurity("ok|Q2Fy|cGFzc3x3b3Jk"))
-        assertNull(CarHotspotStartMain.apConfigSecurity("ok|Q2Fy|cGFzc3x3b3Jk|x"))
-        assertTrue(CarHotspotStartMain.apConfigAccepted("ok|Car-Original"))
-        assertTrue(CarHotspotStartMain.apConfigAccepted("ok"))
-        assertFalse(CarHotspotStartMain.apConfigAccepted("error rejected"))
-        assertFalse(CarHotspotStartMain.apConfigAccepted(null))
-    }
 
-    @Test fun ssidQuotesAreShellEscaped() {
-        val command = CarHotspotStartMain.apConfigCommand("/a/b.apk",
-            HotspotCredentials("it's", "pass'word", ManualHotspotSecurity.WPA2))
-        assertTrue(command.contains(" 'it'\"'\"'s' AUTO"))
-        assertFalse(command.contains("pass'word"))
-    }
 
     @Test fun appWriteKeepsTheSavedHiddenAndBandFields() {
         val written = mutableListOf<WifiConfiguration>()

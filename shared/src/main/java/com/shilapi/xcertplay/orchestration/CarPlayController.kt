@@ -86,7 +86,7 @@ import com.shilapi.xcertplay.transport.forWirelessLink
 import com.shilapi.xcertplay.transport.I2cTransport
 import com.shilapi.xcertplay.transport.I2cTransportException
 import com.shilapi.xcertplay.transport.IphoneCarPlayConfiguration
-import com.shilapi.xcertplay.transport.IphoneUsbAdbGrant
+import com.shilapi.xcertplay.transport.IphoneUsbGrant
 import com.shilapi.xcertplay.transport.IphoneUsbException
 import com.shilapi.xcertplay.transport.IphoneUsbHost
 import com.shilapi.xcertplay.transport.IphoneUsbMatcher
@@ -225,8 +225,8 @@ class CarPlayController(
     private var permissionPollGeneration = 0
     private var reenumerationAttempts = 0
     @Volatile private var wiredDeviceName: String? = null
-    private val usbAdbGrantAttempts = mutableSetOf<String>()
-    private val pendingUsbAdbGrants = mutableSetOf<String>()
+    private val usbPlatformGrantAttempts = mutableSetOf<String>()
+    private val pendingUsbPlatformGrants = mutableSetOf<String>()
     private var lastReportedStatus: CarPlayStatus? = null
     private var mfiResetLogged = false
 
@@ -2083,8 +2083,8 @@ class CarPlayController(
         diagnosticRun.incrementAndGet()
         availabilityPollGeneration.incrementAndGet()
         permissionPollGeneration++
-        usbAdbGrantAttempts.clear()
-        pendingUsbAdbGrants.clear()
+        usbPlatformGrantAttempts.clear()
+        pendingUsbPlatformGrants.clear()
         phase = Phase.IPHONE
         reenumerationAttempts = 0
         iphoneWaitStartedAt = null
@@ -2129,11 +2129,11 @@ class CarPlayController(
         mainHandler.post { doRequestIphonePermission(device) }
     }
 
-    private fun doRequestIphonePermission(device: UsbDevice, allowAdbFallback: Boolean = true) {
+    private fun doRequestIphonePermission(device: UsbDevice, allowPlatformFallback: Boolean = true) {
         if (closed) return
-        if (usbAdbGrantKey(device) in pendingUsbAdbGrants) return
+        if (usbPlatformGrantKey(device) in pendingUsbPlatformGrants) return
         try {
-            when (val request = iphoneHost.requestPermission(device, allowAdbFallback)) {
+            when (val request = iphoneHost.requestPermission(device, allowPlatformFallback)) {
                 is IphoneUsbHost.PermissionRequest.AlreadyGranted -> {
                     debugLog("wired iPhone USB permission already granted")
                     permissionGrant.set(false)
@@ -2142,18 +2142,18 @@ class CarPlayController(
                 is IphoneUsbHost.PermissionRequest.Requested -> {
                     debugLog(
                         "wired iPhone USB permission requested " +
-                            "afterMissingUiAdbFailure=${request.afterMissingUiAdbFailure}",
+                            "afterMissingUiGrantFailure=${request.afterMissingUiGrantFailure}",
                     )
                     permissionGrant.set(false)
                     onStatus(CarPlayStatus.RequestingIphonePermission)
-                    pollIphonePermission(device, request.afterMissingUiAdbFailure)
+                    pollIphonePermission(device, request.afterMissingUiGrantFailure)
                 }
-                is IphoneUsbHost.PermissionRequest.AdbRequired -> {
-                    debugLog("wired iPhone USB permission route=ADB; system permission UI unavailable")
+                is IphoneUsbHost.PermissionRequest.PlatformGrantRequired -> {
+                    debugLog("wired iPhone USB permission route=platform; system permission UI unavailable")
                     permissionGrant.set(false)
                     permissionPollGeneration++
                     onStatus(CarPlayStatus.RequestingIphonePermission)
-                    attemptIphoneUsbAdbGrant(request.device)
+                    attemptIphoneUsbGrant(request.device)
                 }
             }
         } catch (error: Throwable) {
@@ -2161,36 +2161,32 @@ class CarPlayController(
         }
     }
 
-    private fun usbAdbGrantKey(device: UsbDevice): String =
+    private fun usbPlatformGrantKey(device: UsbDevice): String =
         "$phase:$reenumerationAttempts:${device.deviceName}:${device.deviceId}"
 
-    private fun attemptIphoneUsbAdbGrant(device: UsbDevice) {
-        val key = usbAdbGrantKey(device)
-        if (!usbAdbGrantAttempts.add(key)) {
-            doRequestIphonePermission(device, allowAdbFallback = false)
+    private fun attemptIphoneUsbGrant(device: UsbDevice) {
+        val key = usbPlatformGrantKey(device)
+        if (!usbPlatformGrantAttempts.add(key)) {
+            doRequestIphonePermission(device, allowPlatformFallback = false)
             return
         }
-        pendingUsbAdbGrants.add(key)
+        pendingUsbPlatformGrants.add(key)
         val grantPhase = phase
         val grantGeneration = permissionPollGeneration
         connectionDiagnostic(
-            "USB permission ADB grant starting phase=$phase reenumerationAttempts=$reenumerationAttempts",
+            "USB platform permission starting phase=$phase reenumerationAttempts=$reenumerationAttempts",
         )
         executor.execute {
-            val result = runCatching { IphoneUsbAdbGrant.grant(appContext, device) }
-                .getOrElse { IphoneUsbAdbGrant.Result(IphoneUsbAdbGrant.Code.ERROR) }
-            connectionDiagnostic(
-                "USB permission ADB grant result=${result.code} attached=${result.attached} " +
-                    "granted=${result.granted}",
-            )
+            val result = runCatching { IphoneUsbGrant.grant(appContext, device) }.getOrDefault(IphoneUsbGrant.Code.ERROR)
+            connectionDiagnostic("USB platform permission result=$result")
             mainHandler.post {
                 if (closed || phase != grantPhase || permissionPollGeneration != grantGeneration) return@post
                 // A stale grant must not clear the same key owned by a newer reconnect generation.
-                pendingUsbAdbGrants.remove(key)
+                pendingUsbPlatformGrants.remove(key)
                 if (requireUsbManager().hasPermission(device)) {
                     onIphonePermission(IphoneUsbHost.PermissionResult.Granted(device))
                 } else {
-                    doRequestIphonePermission(device, allowAdbFallback = false)
+                    doRequestIphonePermission(device, allowPlatformFallback = false)
                 }
             }
         }
@@ -2248,10 +2244,10 @@ class CarPlayController(
     }
 
     /** Some Android builds grant the dialog without delivering the permission broadcast. */
-    private fun pollIphonePermission(device: UsbDevice, afterMissingUiAdbFailure: Boolean = false) {
+    private fun pollIphonePermission(device: UsbDevice, afterMissingUiGrantFailure: Boolean = false) {
         val generation = ++permissionPollGeneration
         // A custom OEM permission page may still be visible even when the standard AOSP component
-        // is absent. Preserve the full user-response window after the ADB fallback fails.
+        // is absent. Preserve the full user-response window after the platform grant fails.
         val deadlineNanos = System.nanoTime() + PERMISSION_POLL_TIMEOUT_MILLIS * 1_000_000L
         val check = object : Runnable {
             override fun run() {
@@ -2264,9 +2260,9 @@ class CarPlayController(
                     if (permissionGrant.compareAndSet(false, true)) {
                         onStatus(
                             CarPlayStatus.Failed(
-                                if (afterMissingUiAdbFailure) {
+                                if (afterMissingUiGrantFailure) {
                                     "The head unit's standard USB authorization page is unavailable, and neither " +
-                                        "approved ADB nor its system permission request granted iPhone access"
+                                        "the platform grant nor its system permission request granted iPhone access"
                                 } else {
                                     "iPhone USB permission was not granted; tap Reconnect iPhone to retry"
                                 },
@@ -2709,7 +2705,7 @@ class CarPlayController(
         val carCredentials = if (hotspotMode == WirelessHotspotMode.MANUAL &&
             Build.VERSION.SDK_INT == Build.VERSION_CODES.P &&
             com.shilapi.xcertplay.network.CarHotspotSettings.enabled(appContext)) {
-            com.shilapi.xcertplay.network.CarHotspotConfigRead.read(appContext, mayAsk = false,
+            com.shilapi.xcertplay.network.CarHotspotConfigRead.read(appContext,
                 log = ::debugLog).credentials
         } else null
         val manager: WirelessHotspotManager = when (hotspotMode) {

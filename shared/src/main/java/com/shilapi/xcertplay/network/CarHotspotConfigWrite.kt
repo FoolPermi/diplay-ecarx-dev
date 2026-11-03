@@ -4,11 +4,8 @@ import android.content.Context
 import android.net.wifi.WifiConfiguration
 import android.net.wifi.WifiManager
 import android.os.Build
-import com.shilapi.xcertplay.adb.AdbKeys
-import com.shilapi.xcertplay.adb.LocalAdb
 import com.shilapi.xcertplay.orchestration.ManualHotspotBand
 import com.shilapi.xcertplay.orchestration.ManualHotspotSecurity
-import java.util.concurrent.atomic.AtomicReference
 
 /** Credentials for an explicit car-hotspot write; connection settings change only after verification. */
 data class HotspotCredentials(
@@ -18,20 +15,12 @@ data class HotspotCredentials(
     val band: ManualHotspotBand = ManualHotspotBand.AUTO,
 )
 
-/**
- * Writes the car's saved hotspot configuration before starting it. Android 7.1 writes from the app:
- * the WifiConfiguration class is public, only WifiManager.setWifiApConfiguration is hidden, and its
- * gate is CHANGE_WIFI_STATE alone. Android 11+ writes through the shell helper, because the shell
- * holds NETWORK_SETTINGS on 11-12 and OVERRIDE_WIFI_CONFIG since 13. The platform-signed Android 9
- * vehicle build writes a copy of its saved WPA2 configuration and verifies the complete readback.
- * WPA3 hotspots are never downgraded.
- */
+/** Writes and verifies the Android 9 vehicle hotspot configuration in the app. */
 object CarHotspotConfigWrite {
     enum class Result(val diagnostic: String) {
         WRITTEN("car hotspot configuration written"),
         SKIPPED("car hotspot configuration write skipped"),
         UNSUPPORTED_SDK("this Android version does not allow writing the car hotspot configuration"),
-        ADB_UNAVAILABLE("ADB access is missing for the car hotspot configuration write"),
         FAILED("the car hotspot configuration write failed"),
         OPEN_REJECTED("an open hotspot does not overwrite the car's password"),
     }
@@ -40,13 +29,11 @@ object CarHotspotConfigWrite {
     data class WriteOutcome(val result: Result, val ssid: String? = null)
 
     fun supported(sdk: Int = Build.VERSION.SDK_INT): Boolean =
-        sdk == Build.VERSION_CODES.N_MR1 || sdk == 28 || sdk >= Build.VERSION_CODES.R
+        sdk == 28
 
     fun write(
         context: Context,
         credentials: HotspotCredentials,
-        deadline: Long = Long.MAX_VALUE,
-        isCancelled: () -> Boolean = { false },
         sdk: Int = Build.VERSION.SDK_INT,
         log: (String) -> Unit,
     ): WriteOutcome {
@@ -66,8 +53,7 @@ object CarHotspotConfigWrite {
             credentials.ssid.any { it == '\u0000' || it == '\n' || it == '\r' } ||
             credentials.security != ManualHotspotSecurity.WPA2 || credentials.passphrase.length !in 8..63 ||
             credentials.passphrase.any { it.code !in 32..126 })) return WriteOutcome(Result.SKIPPED)
-        return if (sdk <= Build.VERSION_CODES.N_MR1 || sdk == 28) writeWithApp(context, credentials, sdk, log)
-        else writeWithAdb(context, credentials, deadline, isCancelled, log)
+        return writeWithApp(context, credentials, sdk, log)
     }
 
     /** Android 7.1 stores raw (unquoted) SSID and passphrase, like the framework's own default AP configuration. */
@@ -185,54 +171,4 @@ object CarHotspotConfigWrite {
         return sameKey && saved.SSID == credentials.ssid
     }
 
-    private fun writeWithAdb(
-        context: Context,
-        credentials: HotspotCredentials,
-        deadline: Long,
-        isCancelled: () -> Boolean,
-        log: (String) -> Unit,
-    ): WriteOutcome {
-        val client = AtomicReference<LocalAdb?>()
-        val outcome = AtomicReference<WriteOutcome?>()
-        CarHotspotAdbFallback.bounded(deadline, isCancelled,
-            abort = { client.get()?.cancelPendingOperations() }) {
-            val adb = LocalAdb(AdbKeys.load(context))
-            client.set(adb)
-            adb.use {
-                val access = if (isCancelled() || Thread.currentThread().isInterrupted || System.nanoTime() >= deadline) null
-                    else adb.connect(mayAsk = false)
-                if (access != null && access != LocalAdb.Access.READY) log("car hotspot config: ADB access=$access")
-                if (access != LocalAdb.Access.READY) {
-                    outcome.set(WriteOutcome(Result.ADB_UNAVAILABLE))
-                    false
-                } else {
-                    val timeout = ((deadline - System.nanoTime()) / 1_000_000L).coerceIn(1_000, 30_000).toInt()
-                    outcome.set(writeAdb({ command, millis, input -> adb.shell(command, millis, input) },
-                        context.applicationInfo.sourceDir, credentials, timeout, log))
-                    outcome.get()?.result == Result.WRITTEN
-                }
-            }
-        }
-        return outcome.get() ?: WriteOutcome(Result.FAILED).also { log("car hotspot config: ADB write did not finish") }
-    }
-
-    internal fun writeAdb(
-        shell: (String, Int, ByteArray?) -> String?,
-        apk: String,
-        credentials: HotspotCredentials,
-        timeoutMillis: Int,
-        log: (String) -> Unit,
-    ): WriteOutcome {
-        val passphrase = credentials.passphrase.toByteArray(Charsets.UTF_8)
-        val stdin = "${passphrase.size}\n".toByteArray(Charsets.UTF_8) + passphrase
-        val reply = CarHotspotStartMain.parseApConfig(
-            shell(CarHotspotStartMain.apConfigCommand(apk, credentials), timeoutMillis, stdin))
-        return when {
-            reply != null && CarHotspotStartMain.apConfigAccepted(reply) ->
-                WriteOutcome(Result.WRITTEN, CarHotspotStartMain.apConfigSsid(reply))
-            reply == "error open" -> WriteOutcome(Result.OPEN_REJECTED)
-            else -> WriteOutcome(Result.FAILED)
-                .also { log("car hotspot config: shell write failed: ${reply ?: "no reply"}") }
-        }
-    }
 }

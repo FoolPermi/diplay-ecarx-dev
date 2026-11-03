@@ -12,7 +12,7 @@
     <string name="settings_swipe_advanced">高级（实验性）</string>
     <string name="settings_advanced_subtitle">面向有经验用户的实验性及车型专用设置</string>
     <string name="settings_advanced_caution_title">请谨慎更改</string>
-    <string name="settings_advanced_caution_description">这些功能可能取决于车辆固件、ADB 权限或 CarPlay 的实验性行为。日常设置位于上方各类别中。</string>
+    <string name="settings_advanced_caution_description">这些功能可能取决于车机固件或实验性 CarPlay 行为。日常设置已归入上方分类。</string>
     <string name="settings_search">搜索</string>
     <string name="settings_open_category">打开%1$s设置</string>
     <string name="settings_ready_connected">CarPlay 正在运行。需要重新连接的更改会特别说明。</string>

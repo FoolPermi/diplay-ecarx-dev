@@ -70,10 +70,13 @@ internal object CrashRecord {
     }
 }
 
-/** Installs [CrashRecord] when the process starts, before any activity, receiver or service runs. */
+/** Installs crash reporting and logs permissions before any activity, receiver or service runs. */
 class CrashRecordInstaller : ContentProvider() {
     override fun onCreate(): Boolean {
-        context?.let(CrashRecord::install)
+        context?.let { app ->
+            CrashRecord.install(app)
+            PermissionDiagnosticSnapshot.log(app) { android.util.Log.i("DiPlayPermissions", it) }
+        }
         return true
     }
 

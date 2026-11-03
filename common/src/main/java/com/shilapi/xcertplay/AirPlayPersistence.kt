@@ -437,7 +437,7 @@ object AirPlayPersistence {
             .putInt(KEY_WIFI_P2P_PREFERRED_CHANNEL, channel).apply()
     }
 
-    /** Wi-Fi Direct: pause the car's own Wi-Fi search while CarPlay runs (on by default, needs ADB). */
+    /** Wi-Fi Direct: pause the car's own Wi-Fi search while CarPlay runs (on by default, Android 9 platform grant). */
     fun loadWifiDirectScanPause(context: Context): Boolean =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_WIFI_DIRECT_SCAN_PAUSE, true)
 

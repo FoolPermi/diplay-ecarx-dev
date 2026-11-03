@@ -49,9 +49,6 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import com.shilapi.xcertplay.adb.AdbDiagnostics
-import com.shilapi.xcertplay.adb.AdbKeys
-import com.shilapi.xcertplay.adb.LocalAdb
 import com.shilapi.xcertplay.airplay.AirPlayDisplaySettings
 import com.shilapi.xcertplay.airplay.CarPlayClusterDisplay
 import com.shilapi.xcertplay.airplay.CarPlayDisplayScale
@@ -1393,6 +1390,69 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         content.addView(button(getString(R.string.sound_output_test), false) { showSoundOutputTest() }, matchButton(10, 60))
     }
 
+    private fun showPermissionCheck() {
+        val body = column().apply { setPadding(dp(GROUP_GAP_DP), dp(CONTROL_GAP_DP), dp(GROUP_GAP_DP), dp(CONTROL_GAP_DP)) }
+        fun refresh() {
+            body.removeAllViews()
+            fun row(title: String, value: String, color: Int) {
+                body.addView(LinearLayout(this).apply {
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(0, dp(NOTE_LINE_GAP_DP), 0, dp(NOTE_LINE_GAP_DP))
+                    addView(label(title, 16, TEXT), LinearLayout.LayoutParams(0, -2, 1f))
+                    addView(label(value, 16, color), LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(SETTINGS_CONTROL_INSET_DP) })
+                })
+            }
+            fun access(title: Int, granted: Boolean) = row(getString(title),
+                getString(if (granted) R.string.settings_permission_granted else R.string.settings_permission_denied),
+                if (granted) READY else WARNING)
+            val snapshot = PermissionDiagnosticSnapshot.read(this)
+            body.addView(label(getString(R.string.settings_permission_uid, snapshot.uid), 14, MUTED))
+            val signature = when (snapshot.signature) {
+                PackageManager.SIGNATURE_MATCH -> R.string.settings_permission_signature_match
+                PackageManager.SIGNATURE_UNKNOWN_PACKAGE -> R.string.settings_permission_unknown
+                else -> R.string.settings_permission_signature_mismatch
+            }
+            row(getString(R.string.settings_permission_signature), getString(signature),
+                if (snapshot.signature == PackageManager.SIGNATURE_MATCH) READY else WARNING)
+            body.addView(label(getString(R.string.settings_permission_access), 18, TEXT).apply { setPadding(0, dp(SETTINGS_BLOCK_GAP_DP), 0, dp(NOTE_ATTACH_GAP_DP)) })
+            snapshot.access.forEach { (permission, granted) ->
+                access(when (permission) {
+                    UsbPermissionSetup.Permission.ACCESSIBILITY -> R.string.settings_permission_usb_service
+                    UsbPermissionSetup.Permission.USAGE -> R.string.settings_permission_usage
+                    UsbPermissionSetup.Permission.OVERLAY -> R.string.settings_permission_overlay
+                }, granted)
+            }
+            access(R.string.settings_permission_wheel_service, snapshot.wheelAllowed)
+            row(getString(R.string.settings_permission_wheel_connection),
+                getString(if (snapshot.wheelConnected) R.string.settings_permission_connected else R.string.settings_permission_disconnected),
+                if (snapshot.wheelConnected) READY else MUTED)
+            body.addView(label(getString(R.string.settings_permission_manifest), 18, TEXT).apply { setPadding(0, dp(SETTINGS_BLOCK_GAP_DP), 0, dp(NOTE_ATTACH_GAP_DP)) })
+            snapshot.permissions.forEach { permission ->
+                val status = when (permission.state) {
+                    PermissionDiagnosticSnapshot.State.GRANTED -> R.string.settings_permission_granted
+                    PermissionDiagnosticSnapshot.State.DENIED -> R.string.settings_permission_denied
+                    PermissionDiagnosticSnapshot.State.UNAVAILABLE -> R.string.settings_permission_unavailable
+                    PermissionDiagnosticSnapshot.State.UNKNOWN -> R.string.settings_permission_unknown
+                }
+                val color = when (permission.state) {
+                    PermissionDiagnosticSnapshot.State.GRANTED -> READY
+                    PermissionDiagnosticSnapshot.State.DENIED, PermissionDiagnosticSnapshot.State.UNKNOWN -> WARNING
+                    PermissionDiagnosticSnapshot.State.UNAVAILABLE -> MUTED
+                }
+                row(permission.name.removePrefix("android.permission."), getString(status), color)
+            }
+        }
+        refresh()
+        val dialog = appDialogBuilder().setTitle(R.string.settings_permission_check)
+            .setView(ScrollView(appDialogContext()).apply { addView(body) })
+            .setNeutralButton(R.string.settings_permission_refresh, null)
+            .setPositiveButton(R.string.close, null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(android.content.DialogInterface.BUTTON_NEUTRAL).setOnClickListener { refresh() }
+        }
+        dialog.show()
+    }
+
     private fun showSoundOutputTest() {
         var oemPreview = false
         val preview = AudioChannelPreview(context = this, report = { detail ->
@@ -1766,6 +1826,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         }
         filteredSection(content, SettingsSection.DIAGNOSTICS,
             getString(R.string.diagnostics), R.drawable.ic_dp_diagnostics) { card ->
+            card.addView(button(getString(R.string.settings_permission_check), false) { showPermissionCheck() }, matchButton(SETTINGS_BLOCK_GAP_DP, CONTROL_HEIGHT_DP))
             exportButton = button(if (exportInProgress) getString(R.string.saving_report) else getString(R.string.save_diagnostic_report), false) {
                 saveReportToDownloads()
             }.apply { isEnabled = !exportInProgress }
@@ -2077,7 +2138,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 // The watcher for other apps' calls needs DiPlay running outside a CarPlay session too, which
                 // the accessibility service provides.
                 if (it && !WheelKeyService.connected()) {
-                    Thread({ WheelKeyService.enableOverAdb(this) }, "diplay-phone-audio-enable").start()
+                    Thread({ WheelKeyService.enable(this) }, "diplay-phone-audio-enable").start()
                 }
             }
             audioFocusControls(card)
@@ -2194,7 +2255,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 }
                 val overlay = LauncherBubble.permitted(this)
                 card.addView(label(if (overlay) getString(R.string.center_map_overlay_allowed)
-                    else getString(R.string.center_map_overlay_missing, packageName), 14, if (overlay) MUTED else WARNING))
+                    else getString(R.string.center_map_overlay_missing), 14, if (overlay) MUTED else WARNING))
             }
         }
         filteredSection(content, SettingsSection.PERMISSIONS_AND_HELP,
@@ -2592,7 +2653,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 } },
             )
             val saved = if (result == CarHotspotTethering.Result.READY && Build.VERSION.SDK_INT == 28 &&
-                !startupHotspotCancelled) CarHotspotConfigRead.read(app, mayAsk = false,
+                !startupHotspotCancelled) CarHotspotConfigRead.read(app,
                     log = { Log.i("DiPlay-Hotspot", it) }).credentials else null
             if (saved != null && !startupHotspotCancelled) {
                 AirPlayPersistence.saveManualHotspotSsid(app, saved.ssid)
@@ -2667,7 +2728,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         render()
         val app = applicationContext
         Thread({
-            val read = CarHotspotConfigRead.read(app, mayAsk = true, log = { Log.i("DiPlay-Hotspot", it) })
+            val read = CarHotspotConfigRead.read(app, log = { Log.i("DiPlay-Hotspot", it) })
             Log.i("DiPlay-Hotspot", "car hotspot config read: credentials=${read.credentials != null} reason=${read.reason}")
             val saved = read.credentials
             runOnUiThread {
@@ -2683,11 +2744,6 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                 carHotspotConfigStatus = when {
                     saved != null && edit -> null
                     saved != null -> R.string.settings_car_hotspot_config_imported
-                    read.reason == CarHotspotConfigRead.Reason.ADB_UNAVAILABLE -> when (read.access) {
-                        LocalAdb.Access.NOT_APPROVED -> R.string.adb_not_approved
-                        LocalAdb.Access.UNSUPPORTED -> R.string.adb_pairing_only
-                        else -> adbOffText()
-                    }
                     else -> R.string.settings_hotspot_read_failed
                 }
                 if (saved != null && !edit) {
@@ -2721,13 +2777,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         render()
         val app = applicationContext
         Thread({
-            var access = LocalAdb.Access.READY
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                access = runCatching { CarHotspotSetup.grant(applicationContext, emptyList()) }
-                    .getOrDefault(LocalAdb.Access.UNREACHABLE)
-            }
-            val outcome = if (access != LocalAdb.Access.READY) CarHotspotConfigWrite.WriteOutcome(CarHotspotConfigWrite.Result.ADB_UNAVAILABLE)
-            else CarHotspotConfigWrite.write(app, credentials, log = { Log.i("DiPlay-Hotspot", it) })
+            val outcome = CarHotspotConfigWrite.write(app, credentials, log = { Log.i("DiPlay-Hotspot", it) })
             Log.i("DiPlay-Hotspot", "car hotspot config write: ${outcome.result}")
             runOnUiThread {
                 carHotspotConfigBusy = false
@@ -2748,11 +2798,6 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                     }
                     CarHotspotConfigWrite.Result.SKIPPED -> R.string.settings_car_hotspot_config_wpa3
                     CarHotspotConfigWrite.Result.OPEN_REJECTED -> R.string.settings_car_hotspot_config_open
-                    CarHotspotConfigWrite.Result.ADB_UNAVAILABLE -> when (access) {
-                        LocalAdb.Access.NOT_APPROVED -> R.string.adb_not_approved
-                        LocalAdb.Access.UNSUPPORTED -> R.string.adb_pairing_only
-                        else -> adbOffText()
-                    }
                     else -> R.string.settings_car_hotspot_config_failed
                 }
                 render()
@@ -2929,8 +2974,6 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         val tested = entry.status == SetupGuide.Status.TESTED
         addView(badge(getString(if (tested) R.string.setup_badge_tested else R.string.setup_badge_experimental),
             if (tested) READY else WARNING), LinearLayout.LayoutParams(-2, -2))
-        if (entry.needsAdb) addView(badge(getString(R.string.setup_badge_adb), ACCENT),
-            LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(8) })
     }
 
     private fun setupDoneStep(content: LinearLayout) {
@@ -3498,8 +3541,8 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         Thread({
             val result = operation.run()
             SettingsActionDiagnostics.record(applicationContext, SettingsActionDiagnostics.Action.USB_PERMISSIONS,
-                "phase=finished access=${result.access} cancelled=${operation.isCancelled} " +
-                    "verified=${result.verified} commandsFailed=${result.commandsFailed}")
+                "phase=finished cancelled=${operation.isCancelled} " +
+                    "verified=${result.verified} failed=${result.failed}")
             handler.post {
                 if (usbPermissionOperation !== operation || operation.isCancelled || isFinishing || isDestroyed) {
                     return@post
@@ -3515,12 +3558,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                         .setPositiveButton(R.string.close, null)
                         .show()
                 } else {
-                    val reason = when (result.access) {
-                        LocalAdb.Access.NOT_APPROVED -> getString(R.string.auto_grant_confirm_msg)
-                        LocalAdb.Access.UNSUPPORTED -> getString(R.string.adb_pairing_only)
-                        else -> getString(R.string.auto_grant_incomplete)
-                    }
-                    showManualPermissionDialog(reason)
+                    showManualPermissionDialog(getString(R.string.auto_grant_incomplete))
                 }
             }
         }, "diplay-auto-permission").start()
@@ -3548,21 +3586,6 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             })
             body.addView(label("$title: ${getString(if (granted) R.string.permission_enabled_ready else R.string.permission_not_enabled)}", 14, if (granted) MUTED else WARNING))
         }
-        val adbCmd = UsbPermissionSetup.manualCommand(packageName)
-        body.addView(label(getString(R.string.manual_grant_cmd_hint), 14, MUTED).apply { setPadding(0, dp(12), 0, dp(6)) })
-        body.addView(label(adbCmd, 13, TEXT).apply {
-            typeface = Typeface.MONOSPACE
-            setTextIsSelectable(true)
-            setPadding(dp(8), dp(8), dp(8), dp(8))
-            setBackgroundColor(BUTTON)
-        })
-        body.addView(button(getString(R.string.copy_command), false) {
-            getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(
-                android.content.ClipData.newPlainText("DiPlay ADB Command", adbCmd)
-            )
-            toast(getString(R.string.copied_to_the_car_clipboard_run_the_command_on_your_comput))
-        }, matchButton(8, 50))
-
         appDialogBuilder()
             .setTitle(getString(R.string.permissions_and_connection_help))
             .setView(ScrollView(appDialogContext()).apply { addView(body) })
@@ -3582,12 +3605,12 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         card.addView(button(getString(R.string.wheel_keys_open_settings), false) {
             if (!UsbAutoConfirmService.openSettings(this)) toast(getString(R.string.wheel_keys_no_settings))
         }, matchButton(10, 56))
-        card.addView(button(getString(R.string.wheel_keys_enable_adb), false) {
+        card.addView(button(getString(R.string.wheel_keys_enable), false) {
             Thread({
-                val access = WheelKeyService.enableOverAdb(this)
+                val access = WheelKeyService.enable(this)
                 runOnUiThread {
-                    if (access != com.shilapi.xcertplay.adb.LocalAdb.Access.READY) {
-                        toast(getString(R.string.wheel_keys_adb_failed, access.name))
+                    if (!access) {
+                        toast(getString(R.string.wheel_keys_enable_failed))
                     }
                     render()
                 }
@@ -3640,26 +3663,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             card.addView(label(getString(R.string.settings_hy_siri_key_description), 14, MUTED))
             if (Build.VERSION.SDK_INT == Build.VERSION_CODES.P &&
                 checkSelfPermission(Manifest.permission.READ_LOGS) != PackageManager.PERMISSION_GRANTED) {
-                card.addView(button(getString(R.string.settings_hy_siri_grant_logs), false) {
-                    Thread({
-                        val access = runCatching {
-                            LocalAdb(AdbKeys.load(applicationContext)).use { adb ->
-                                adb.connect(mayAsk = true).also {
-                                    if (it == LocalAdb.Access.READY) {
-                                        adb.shell("pm grant $packageName android.permission.READ_LOGS")
-                                    }
-                                }
-                            }
-                        }.getOrDefault(LocalAdb.Access.UNREACHABLE)
-                        runOnUiThread {
-                            val granted = checkSelfPermission(Manifest.permission.READ_LOGS) == PackageManager.PERMISSION_GRANTED
-                            toast(getString(if (granted) R.string.settings_hy_siri_grant_success
-                                else R.string.settings_hy_siri_grant_failed))
-                            if (!granted) Log.w("DiPlay", "HY Siri log permission failed: $access")
-                            render()
-                        }
-                    }, "diplay-hy-siri-grant").start()
-                }, matchButton(10, 56))
+                card.addView(label(getString(R.string.settings_hy_siri_grant_failed), 14, WARNING))
             }
             settingsDetails(card, R.string.settings_hy_siri_background, hySiriBackgroundExpanded,
                 { hySiriBackgroundExpanded = it }) { wheelKeyServiceControls(it) }
@@ -3796,12 +3800,12 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             else -> R.string.wheel_keys_service_off
         }), 14, if (connected) MUTED else WARNING))
         if (!connected) {
-            card.addView(actionButton(getString(R.string.wheel_keys_enable_adb), false) {
+            card.addView(actionButton(getString(R.string.wheel_keys_enable), false) {
                 Thread({
-                    val access = WheelKeyService.enableOverAdb(this)
+                    val access = WheelKeyService.enable(this)
                     runOnUiThread {
-                        if (access != com.shilapi.xcertplay.adb.LocalAdb.Access.READY) {
-                            toast(getString(R.string.wheel_keys_adb_failed, access.name))
+                        if (!access) {
+                            toast(getString(R.string.wheel_keys_enable_failed))
                         }
                         render()
                     }
@@ -4122,10 +4126,6 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
     }
 
     /** Whether [status] has every reading an enabled switch needs; null [capabilities] is default mode. */
-    private fun adbOffText(): Int {
-        val enabled = Settings.Global.getInt(contentResolver, Settings.Global.ADB_ENABLED, 0) == 1
-        return if (enabled) R.string.adb_network_not_answering else R.string.adb_off
-    }
 
     private fun gearLetter(value: Int): String = when (value) {
         1 -> "P"
@@ -4842,14 +4842,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         appendLine("Android ${Build.VERSION.RELEASE} / API ${Build.VERSION.SDK_INT}")
         appendLine("App: package=${appContext.packageName} " +
             "debuggable=${appContext.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0}")
-        appendLine("Platform signature check=${runCatching {
-            appContext.packageManager.checkSignatures(appContext.packageName, "android")
-        }.getOrNull()} (0=match; null=unavailable)")
-        for (permission in listOf("RECORD_AUDIO", "MODIFY_AUDIO_ROUTING", "BLUETOOTH_PRIVILEGED",
-            "CHANGE_COMPONENT_ENABLED_STATE", "TETHER_PRIVILEGED", "CONNECTIVITY_INTERNAL")) {
-            appendLine("Permission $permission=${appContext.checkSelfPermission("android.permission.$permission") == PackageManager.PERMISSION_GRANTED}")
-        }
-        appendLine("USB setup permissions: ${UsbPermissionSetup.snapshot(appContext)}")
+        appendLine(PermissionDiagnosticSnapshot.read(appContext).report())
         appendLine(runCatching {
             val usb = appContext.getSystemService(android.hardware.usb.UsbManager::class.java)
             if (usb == null) "USB devices: unavailable" else buildString {
@@ -4919,7 +4912,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         appendLine()
         appendLine(UpdateAvailability.report(appContext, System.currentTimeMillis()))
         appendLine()
-        appendLine(AdbDiagnostics.report(appContext))
+        appendLine("Platform permission build: Android 9 native grants")
         appendLine()
         appendLine("--- Recent own-app process exits (Android 11+) ---")
         appendLine(ProcessExitDiagnostics.report(appContext))
@@ -5195,8 +5188,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         parent.addView(result.rowView)
         return result.switch
     }
-    // The car's own music rhythm: saved on only once the head unit's audio call is reachable, from DiPlay itself or
-    // over its ADB access.
+    // Save music rhythm only after the vehicle audio interface is reachable.
     private fun ambientBrightnessText(level: Int): String =
         if (level <= 0) getString(R.string.settings_ambient_minimum) else getString(R.string.settings_ambient_brightness_value, level)
 
@@ -5672,7 +5664,6 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             intent.action == Intent.ACTION_MAIN && intent.hasCategory(Intent.CATEGORY_LAUNCHER) &&
                 !intent.hasExtra("page")
 
-        private const val ADB_KEY_SAVE_WAIT_MILLIS = 500L
         /**
          * How long the launch-time auto-connect waits before it starts a session.
          *

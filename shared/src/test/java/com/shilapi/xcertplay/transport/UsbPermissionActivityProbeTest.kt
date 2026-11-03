@@ -71,26 +71,26 @@ class UsbPermissionActivityProbeTest {
         assertEquals(UsbPermissionActivityProbe.State.AVAILABLE, UsbPermissionActivityProbe.inspect(context).state)
     }
 
-    @Test fun missingUiUsesAdbWithoutLaunchingTheSystemRequest() {
+    @Test @Config(sdk = [28]) fun missingUiUsesPlatformGrantWithoutLaunchingTheSystemRequest() {
         val usb = context.getSystemService(UsbManager::class.java)
         val diagnostics = mutableListOf<String>()
         for (name in listOf("initial", "reenumerated")) {
             val host = IphoneUsbHost(context, usb, IphoneUsbMatcher.appleVendor(), onDiagnostic = diagnostics::add)
-            assertTrue(host.requestPermission(device(name)) is IphoneUsbHost.PermissionRequest.AdbRequired)
+            assertTrue(host.requestPermission(device(name)) is IphoneUsbHost.PermissionRequest.PlatformGrantRequired)
         }
         assertEquals(0, PermissionRequestUsbManagerShadow.requests)
         assertTrue(diagnostics.all { it.contains("state=UNAVAILABLE") })
         assertTrue(diagnostics.none { it.contains("cached=") })
     }
 
-    @Test fun failedAdbWithMissingUiFallsBackToTheSystemRequest() {
+    @Test fun failedPlatformGrantWithMissingUiFallsBackToTheSystemRequest() {
         val usb = context.getSystemService(UsbManager::class.java)
         val host = IphoneUsbHost(context, usb, IphoneUsbMatcher.appleVendor())
 
-        val request = host.requestPermission(device("initial"), allowAdbFallback = false)
+        val request = host.requestPermission(device("initial"), allowPlatformFallback = false)
 
         assertTrue(request is IphoneUsbHost.PermissionRequest.Requested)
-        assertTrue((request as IphoneUsbHost.PermissionRequest.Requested).afterMissingUiAdbFailure)
+        assertTrue((request as IphoneUsbHost.PermissionRequest.Requested).afterMissingUiGrantFailure)
         assertEquals(1, PermissionRequestUsbManagerShadow.requests)
     }
 
@@ -101,11 +101,11 @@ class UsbPermissionActivityProbeTest {
 
         val request = host.requestPermission(device("initial"))
         assertTrue(request is IphoneUsbHost.PermissionRequest.Requested)
-        assertFalse((request as IphoneUsbHost.PermissionRequest.Requested).afterMissingUiAdbFailure)
+        assertFalse((request as IphoneUsbHost.PermissionRequest.Requested).afterMissingUiGrantFailure)
         assertEquals(1, PermissionRequestUsbManagerShadow.requests)
     }
 
-    @Test fun existingPermissionDoesNotProbeAdbOrTheUi() {
+    @Test fun existingPermissionDoesNotProbeTheGrantOrUi() {
         val usb = context.getSystemService(UsbManager::class.java)
         val device = device("granted")
         shadowOf(usb).addOrUpdateUsbDevice(device, true)

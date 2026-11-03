@@ -2,6 +2,10 @@
 
 Instructions for coding agents that work on DiPlay.
 
+## Vehicle scope
+
+Production targets Android 9 / API 28, ECARX 753 / Qualcomm 820A, with the vehicle platform signature. Ship ARM64 and ARMv7 only. Other Android releases are debugging environments. App runtime, permission setup and recovery must not depend on ADB. Use [the permission checklist](docs/ADB_AND_PLATFORM_PERMISSIONS.zh-CN.md) and issue #21 as the implementation and validation reference.
+
 ## Checks
 
 Run the CI command from `.github/workflows/android.yml` before you report a change as done:
@@ -39,7 +43,7 @@ Ask which goal the driver has when they look for the setting. Use the first row 
 A setting goes to Advanced when it is experimental, depends on specific firmware, or is an opt-in that can break sound, video or the connection on some head units.
 A control that fixes a common problem and is safe at its default (for example the audio stream choice) stays in its category.
 Exception: a gated control that only its own audience sees, and that completes an everyday goal, stays in that goal's category.
-Example: auto car hotspot needs ADB but appears only for car-hotspot users, so it is in Connection.
+Example: auto car hotspot depends on vehicle permissions and appears only for car-hotspot users, so it is in Connection.
 
 Mark an experimental setting or card with the title suffix ` (experimental)`, never `· experimental`, a dash, or an `Experimental …` prefix.
 Each locale MUST use its existing form: `(تجريبي)`, `(experimental)`, `(sperimentale)`, `(экспериментально)`, `(експериментально)`, `（实验性）`, `（實驗性）`, `（実験的機能）`.
