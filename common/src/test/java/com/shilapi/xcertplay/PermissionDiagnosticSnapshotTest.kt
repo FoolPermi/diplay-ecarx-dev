@@ -1,6 +1,9 @@
 package com.shilapi.xcertplay
 
 import android.content.pm.PackageInfo
+import android.Manifest
+import android.app.AppOpsManager
+import android.os.Process
 import android.content.pm.PackageManager
 import android.content.pm.PermissionInfo
 import android.content.pm.Signature
@@ -69,5 +72,34 @@ class PermissionDiagnosticSnapshotTest {
         val packages = shadowOf(app.packageManager)
         packages.installPackage(PackageInfo().apply { packageName = "android"; signatures = arrayOf(Signature("5678")) })
         assertEquals(PackageManager.SIGNATURE_NO_MATCH, PermissionDiagnosticSnapshot.read(app).signature)
+    }
+
+    @Test fun reportIncludesRawUsageAppOpAndEffectiveAccessWithoutChangingMode() {
+        val appOps = app.getSystemService(AppOpsManager::class.java)
+        shadowOf(app).grantPermissions(Manifest.permission.PACKAGE_USAGE_STATS)
+        for (mode in listOf(AppOpsManager.MODE_DEFAULT, AppOpsManager.MODE_ALLOWED,
+            AppOpsManager.MODE_IGNORED, AppOpsManager.MODE_ERRORED)) {
+            shadowOf(appOps).setMode(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), app.packageName, mode)
+            val snapshot = PermissionDiagnosticSnapshot.read(app)
+            assertTrue(snapshot.report().contains("Usage access AppOps: GET_USAGE_STATS mode=$mode"))
+            assertEquals(mode == AppOpsManager.MODE_DEFAULT || mode == AppOpsManager.MODE_ALLOWED,
+                snapshot.access[UsbPermissionSetup.Permission.USAGE])
+            assertEquals(mode, appOps.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS,
+                Process.myUid(), app.packageName))
+        }
+    }
+
+    @Test fun processStartupLogsTheReadOnlyPermissionSnapshot() {
+        val appOps = app.getSystemService(AppOpsManager::class.java)
+        shadowOf(appOps).setMode(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), app.packageName,
+            AppOpsManager.MODE_DEFAULT)
+        shadowOf(app).grantPermissions(Manifest.permission.PACKAGE_USAGE_STATS)
+        org.robolectric.Robolectric.buildContentProvider(CrashRecordInstaller::class.java).create()
+        val lines = org.robolectric.shadows.ShadowLog.getLogsForTag("DiPlayPermissions").map { it.msg }
+        assertTrue(lines.any { it.contains("Permission $granted=GRANTED") })
+        assertTrue(lines.any { it.contains("GET_USAGE_STATS mode=3") })
+        assertTrue(lines.any { it.contains("USAGE=true") })
+        assertEquals(AppOpsManager.MODE_DEFAULT,
+            appOps.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), app.packageName))
     }
 }

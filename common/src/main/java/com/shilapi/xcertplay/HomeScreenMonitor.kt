@@ -130,11 +130,20 @@ internal class HomeScreenMonitor(context: Context, private val onChange: (Boolea
 
         /** Usage Access is what the UsageStats poller below reads; without it the monitor only uses events. */
         private fun hasUsageStatsAccess(context: Context): Boolean = runCatching {
+            when (usageStatsAppOpMode(context)) {
+                AppOpsManager.MODE_ALLOWED -> true
+                AppOpsManager.MODE_DEFAULT -> context.checkSelfPermission(android.Manifest.permission.PACKAGE_USAGE_STATS) ==
+                    PackageManager.PERMISSION_GRANTED
+                else -> false
+            }
+        }.getOrDefault(false)
+
+        fun usageStatsAppOpMode(context: Context): Int? = runCatching {
             val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
             appOps.checkOpNoThrow(
                 AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), context.packageName,
-            ) == AppOpsManager.MODE_ALLOWED
-        }.getOrDefault(false)
+            )
+        }.getOrNull()
 
         /** Query all launcher packages declared on the system. */
         fun queryHomePackages(context: Context): Set<String> {

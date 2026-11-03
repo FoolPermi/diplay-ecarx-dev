@@ -6839,6 +6839,7 @@ open class CarPlayHostActivity : ComponentActivity() {
             )
         }
         sessionLog = activeLog
+        PermissionDiagnosticSnapshot.log(this, ::appendLog)
     }
 
     private fun refreshLogView(nowMillis: Long) {

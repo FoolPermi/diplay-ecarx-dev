@@ -1,6 +1,9 @@
 package com.shilapi.xcertplay
 
 import android.content.Context
+import android.app.AppOpsManager
+import android.Manifest
+import android.os.Process
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -102,5 +105,32 @@ class HomeScreenMonitorTest {
             android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
             "${context.packageName}/UnrelatedService")
         assertFalse(HomeScreenMonitor.hasAccess(context))
+    }
+
+    @Test @Config(sdk = [28])
+    fun defaultUsageModeFallsBackToPackagePermission() {
+        org.robolectric.Shadows.shadowOf(context.getSystemService(AppOpsManager::class.java))
+            .setMode(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), context.packageName,
+                AppOpsManager.MODE_DEFAULT)
+        org.robolectric.Shadows.shadowOf(RuntimeEnvironment.getApplication()).denyPermissions(Manifest.permission.PACKAGE_USAGE_STATS)
+        assertFalse(HomeScreenMonitor.hasAccess(context))
+        org.robolectric.Shadows.shadowOf(RuntimeEnvironment.getApplication()).grantPermissions(Manifest.permission.PACKAGE_USAGE_STATS)
+        assertTrue(HomeScreenMonitor.hasAccess(context))
+        assertTrue(UsbPermissionSetup.Permission.USAGE.granted(context))
+    }
+
+    @Test @Config(sdk = [28])
+    fun explicitUsageModesOverridePackagePermission() {
+        val appOps = org.robolectric.Shadows.shadowOf(context.getSystemService(AppOpsManager::class.java))
+        for (permissionGranted in listOf(false, true)) {
+            if (permissionGranted) org.robolectric.Shadows.shadowOf(RuntimeEnvironment.getApplication())
+                .grantPermissions(Manifest.permission.PACKAGE_USAGE_STATS)
+            else org.robolectric.Shadows.shadowOf(RuntimeEnvironment.getApplication()).denyPermissions(Manifest.permission.PACKAGE_USAGE_STATS)
+            for (mode in listOf(AppOpsManager.MODE_ALLOWED, AppOpsManager.MODE_IGNORED, AppOpsManager.MODE_ERRORED)) {
+                appOps.setMode(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), context.packageName, mode)
+                assertEquals("mode=$mode permissionGranted=$permissionGranted",
+                    mode == AppOpsManager.MODE_ALLOWED, HomeScreenMonitor.hasAccess(context))
+            }
+        }
     }
 }

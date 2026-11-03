@@ -15,14 +15,23 @@ internal object PermissionDiagnosticSnapshot {
         val access: Map<UsbPermissionSetup.Permission, Boolean>,
         val wheelAllowed: Boolean,
         val wheelConnected: Boolean,
+        val usageStatsAppOpMode: Int?,
     ) {
         fun report(): String = buildString {
             appendLine("Permission inspection: uid=$uid")
             appendLine("Platform signature check=$signature (0=match)")
             permissions.forEach { appendLine("Permission ${it.name.removePrefix("android.permission.")}=${it.state}") }
             appendLine("USB setup permissions: $access")
+            appendLine("Usage access AppOps: GET_USAGE_STATS mode=${usageStatsAppOpMode ?: "unavailable"} " +
+                "(0=allowed,1=ignored,2=errored,3=default)")
             appendLine("Wheel access: allowed=$wheelAllowed connected=$wheelConnected")
         }.trimEnd()
+    }
+
+    fun log(context: Context, write: (String) -> Unit) {
+        runCatching {
+            read(context).report().lineSequence().forEach { write("Permissions: $it") }
+        }.onFailure { write("Permissions: inspection failed ${it.javaClass.simpleName}") }
     }
 
     fun read(context: Context): Snapshot {
@@ -52,6 +61,7 @@ internal object PermissionDiagnosticSnapshot {
             WheelKeyService.enabledInSettings(context) &&
                 Settings.Secure.getInt(context.contentResolver, Settings.Secure.ACCESSIBILITY_ENABLED, 0) == 1,
             WheelKeyService.connected(),
+            HomeScreenMonitor.usageStatsAppOpMode(context),
         )
     }
 }
