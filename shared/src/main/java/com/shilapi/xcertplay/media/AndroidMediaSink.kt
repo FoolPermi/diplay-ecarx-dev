@@ -2514,7 +2514,7 @@ private class AudioRenderer(
                     val size = info.size
                     if (size > 0) {
                         outputBuffers++
-                        if (outputBuffers == 1 || outputBuffers % DECODED_BUFFER_LOG_INTERVAL == 0) {
+                        if (outputBuffers == 1) {
                             Log.i(
                                 TAG,
                                 "audio decoder output codec=${format.codec} " +
@@ -2858,7 +2858,6 @@ private class AudioRenderer(
         const val PREBUFFER_WRITE_CHUNK_BYTES = 2 * 1024
         const val STATS_TAG = "DiPlay-AudioStats"
         const val STATS_WINDOW_NS = 5_000_000_000L
-        const val DECODED_BUFFER_LOG_INTERVAL = 50
         const val MAX_REBUFFER_REPORTS = 5
         const val MAX_QUEUE_FULL_REPORTS = 5
     }

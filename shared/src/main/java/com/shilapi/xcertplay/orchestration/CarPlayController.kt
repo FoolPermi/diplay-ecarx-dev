@@ -504,7 +504,12 @@ class CarPlayController(
         }
 
         override fun onDebugLog(message: String) {
-            debugLog(message)
+            // AirPlaySession already wrote this line to logcat.
+            try {
+                uiListener?.onDebugLog(message)
+            } catch (error: Exception) {
+                Log.w(IphoneCarPlayConfiguration.TAG, "debug log callback failed", error)
+            }
         }
     }
 
