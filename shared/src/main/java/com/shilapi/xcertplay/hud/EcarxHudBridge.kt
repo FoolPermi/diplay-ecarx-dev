@@ -218,20 +218,26 @@ internal object EcarxHudBridge {
     private var lastGuidanceEnd = "none"
 
     /**
-     * Called with `true` when a route starts and `false` when it ends, for the owner that draws the
+     * Distinguishes a hidden map from an ended route for the owner that draws the
      * cluster itself — the CarPlay instrument-cluster stream (display 1, `EcarxClusterPresentation`).
      *
      * One retained session owns this slot. Registration replays the route intent under the same
      * lock as route transitions, and identity-checked removal cannot unregister a newer session.
      */
-    private var clusterPresentationRequested: ((Boolean) -> Unit)? = null
+    private var clusterPresentationRequested: ((ClusterMapIntent) -> Unit)? = null
 
-    fun setClusterPanelOwner(owner: ((Boolean) -> Unit)?) = synchronized(lock) {
-        clusterPresentationRequested = owner
-        owner?.invoke(guidanceActive && clusterVisibleWanted)
+    private val mapIntent: ClusterMapIntent get() = when {
+        !guidanceActive -> ClusterMapIntent.NO_ROUTE
+        clusterVisibleWanted -> ClusterMapIntent.SHOWN
+        else -> ClusterMapIntent.HIDDEN
     }
 
-    fun clearClusterPanelOwner(expected: (Boolean) -> Unit) = synchronized(lock) {
+    fun setClusterPanelOwner(owner: ((ClusterMapIntent) -> Unit)?) = synchronized(lock) {
+        clusterPresentationRequested = owner
+        owner?.invoke(mapIntent)
+    }
+
+    fun clearClusterPanelOwner(expected: (ClusterMapIntent) -> Unit) = synchronized(lock) {
         if (clusterPresentationRequested === expected) clusterPresentationRequested = null
     }
 
@@ -532,10 +538,10 @@ internal object EcarxHudBridge {
     private fun setVisibilityIntent(show: Boolean, origin: String) = synchronized(lock) {
         visibilityCount++
         clusterVisibleWanted = show
-        val effective = show && guidanceActive
-        report("cluster visibility intent show=$show origin=$origin routeActive=$guidanceActive panel=$effective")
+        if (!show) presentationWanted = false
+        report("cluster visibility intent show=$show origin=$origin routeActive=$guidanceActive panel=$mapIntent")
         // Repeating an explicit event must also repair a missing or stale window.
-        clusterPresentationRequested?.invoke(effective)
+        clusterPresentationRequested?.invoke(mapIntent)
     }
 
     /** Runtime delivery belongs only to the independent window, never to a settings toggle. */
@@ -807,7 +813,7 @@ internal object EcarxHudBridge {
             "roadPresent=${maneuver.road.isNotEmpty()} hud=${EcarxOutputSettings.enabled(app)} " +
             "elapsedMs=${SystemClock.elapsedRealtime()} ${route.diagnosticState()}")
         // The window owner waits for the source's first frame, independently of HUD output.
-        clusterPresentationRequested?.invoke(clusterVisibleWanted)
+        clusterPresentationRequested?.invoke(mapIntent)
     }
 
     private fun publishRouteMetadata(navi: EcarxDimApi.NaviHandle, etaSeconds: Int): Pair<EcarxDimApi.EcarxResult?, EcarxDimApi.EcarxResult?> {
@@ -978,7 +984,7 @@ internal object EcarxHudBridge {
                 report("DIM guidance ended $lastGuidanceEnd")
                 // Hand the panel back: the presentation stops requesting the cluster stream, so the
                 // head unit's own instrument page returns instead of a frozen last map frame.
-                clusterPresentationRequested?.invoke(false)
+                clusterPresentationRequested?.invoke(mapIntent)
             }
         } finally {
             context?.let { report(EcarxFactoryNavigationRestore.restoreIfPausedByUs(it)) }

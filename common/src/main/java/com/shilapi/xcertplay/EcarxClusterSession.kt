@@ -5,6 +5,7 @@ import android.hardware.display.DisplayManager
 import android.os.Handler
 import android.os.Looper
 import android.view.Surface
+import com.shilapi.xcertplay.hud.ClusterMapIntent
 import com.shilapi.xcertplay.hud.NavigationOutputs
 import com.shilapi.xcertplay.hud.EcarxOutputSettings
 import com.shilapi.xcertplay.airplay.AirPlaySession
@@ -28,10 +29,11 @@ internal class EcarxClusterSession(
     private var firstFrameObserved = false
     private var projectionRequested = false
     private var showFailure: String? = null
-    @Volatile private var wanted = false
+    @Volatile private var intent = ClusterMapIntent.NO_ROUTE
+    private val wanted get() = intent == ClusterMapIntent.SHOWN
     @Volatile private var closed = false
     private val stateListener: () -> Unit = ::onSessionChanged
-    private val routeListener: (Boolean) -> Unit = ::onRouteRequested
+    private val routeListener: (ClusterMapIntent) -> Unit = ::onRouteRequested
     private val displayListener = object : DisplayManager.DisplayListener {
         override fun onDisplayAdded(displayId: Int) { if (displayId == DISPLAY_ID) apply() }
         override fun onDisplayRemoved(displayId: Int) { if (displayId == DISPLAY_ID) hide() }
@@ -45,12 +47,11 @@ internal class EcarxClusterSession(
     }
 
     /** DIM calls under its own lock: record intent and return without calling back into the bridge. */
-    fun onRouteRequested(show: Boolean) {
-        if (closed) return
-        val changed = wanted != show
-        wanted = show
+    fun onRouteRequested(next: ClusterMapIntent) {
         main.post {
-            if (changed) log("intent wanted=$show source=route-and-option")
+            if (closed) return@post
+            if (intent != next) log("intent map=$next source=route-and-option")
+            intent = next
             apply()
         }
     }
@@ -73,15 +74,17 @@ internal class EcarxClusterSession(
             outputSession = session
             mirrorMain = EcarxOutputSettings.mirrorMainScreen(app)
         }
-        if (!wanted || session?.hasRenderedMainFrame != true) {
+        if (session?.hasRenderedMainFrame != true || intent == ClusterMapIntent.NO_ROUTE || (!wanted && mirrorMain)) {
             hide()
             return
         }
+        // DIM controls map visibility. The route owns the independent window and its video source.
+        if (!wanted) projectionRequested = false
         surface?.takeIf { it.isValid }?.let {
             if (mirrorMain) sink.setMirrorSurface(110, MIRROR_KEY, it) else sink.setSurface(111, it)
             // The phone must draw before DIM selects this window; waiting for DIM here would deadlock first-frame gating.
             controller.setClusterOutputVisible(!mirrorMain)
-            if ((mirrorMain || firstFrameObserved) && !projectionRequested) {
+            if (wanted && (mirrorMain || firstFrameObserved) && !projectionRequested) {
                 projectionRequested = NavigationOutputs.requestPresentation(app, true,
                     if (mirrorMain) "cluster mirror surface ready" else "cluster first texture frame")
             }
@@ -92,7 +95,7 @@ internal class EcarxClusterSession(
         panel = EcarxClusterPresentation(app, display, onSurface = { next ->
             if (presentation === panel) onSurface(next)
         }, onPresented = { observedSurface ->
-            if (!closed && wanted && presentation === panel && controller.activeAirPlaySession() === outputSession &&
+            if (!closed && presentation === panel && controller.activeAirPlaySession() === outputSession &&
                 surface === observedSurface && observedSurface.isValid && !mirrorMain && !firstFrameObserved) {
                 firstFrameObserved = true
                 log("video first-frame stream=111 binding=$binding observation=texture-updated " +
@@ -110,7 +113,7 @@ internal class EcarxClusterSession(
                 presentation = null
                 onSurface(null)
                 log("window dismissed source=window-callback")
-                if (!closed && wanted) main.post(::apply)
+                if (!closed) main.post(::apply)
             }
         }
         try {
@@ -164,7 +167,6 @@ internal class EcarxClusterSession(
     fun close() {
         if (closed) return
         closed = true
-        wanted = false
         controller.clearClusterOutputStateListener(stateListener)
         NavigationOutputs.clearClusterPanelOwner(routeListener)
         main.removeCallbacksAndMessages(null)
