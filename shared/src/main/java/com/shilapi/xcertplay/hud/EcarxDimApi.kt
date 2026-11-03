@@ -8,7 +8,8 @@ import com.ecarx.xui.adaptapi.diminteraction.INaviInteraction
 import java.lang.reflect.Modifier
 
 /**
- * Compile-only AdaptAPI access. The head unit supplies every vendor class at runtime.
+ * AdaptAPI access and cache-bypassing recovery through the firmware navigation manager.
+ * The head unit supplies every vendor class at runtime.
  * Calls retain diagnostic failures, including missing classes or methods on other firmware.
  * A successful void call means dispatch only; it does not prove the cluster changed.
  */
@@ -131,6 +132,42 @@ internal object EcarxDimApi {
 
     fun updateTurnByTurnArrow(navi: NaviHandle, arrow: Int): EcarxResult = dispatch("updateTurnByTurnArrow($arrow)") {
         navi.api.updateTurnByTurnArrow(arrow)
+    }
+
+    /** Recovery must bypass AdaptAPI caches, which are updated before its swallowed Binder errors. */
+    fun refreshNavigation(guidance: Guidance, destination: String): EcarxResult {
+        val manager = runCatching {
+            Class.forName("android.cevt.dimsupportservice.DimSupportManager")
+                .getMethod("getNavigationManager").invoke(null)
+        }.getOrElse { return EcarxResult.failed("manager=${describe(it)}") }
+            ?: return EcarxResult.failed("manager=unavailable")
+        val type = manager.javaClass
+        val intType = Int::class.javaPrimitiveType!!
+        val boolType = Boolean::class.javaPrimitiveType!!
+        val details = mutableListOf<String>()
+        var accepted = true
+        fun send(label: String, method: String, types: Array<Class<*>>, vararg args: Any) {
+            val result = dispatch(method) { type.getMethod(method, *types).invoke(manager, *args) }
+            accepted = accepted && result.ok
+            details += "$label=${if (result.ok) "returned" else result.reason}"
+        }
+        send("ongoing", "updateOngoingNavigation",
+            arrayOf(boolType, String::class.java, boolType),
+            guidance.status == NAVIGATION_SNAPSHOT_ACTIVE, destination, guidance.muteState == 1)
+        if (guidance.distanceToNextMeters in 0L..Int.MAX_VALUE.toLong()) {
+            send("next", "updateTurnByTurnNextTurn", arrayOf(intType, String::class.java),
+                guidance.distanceToNextMeters.toInt(), guidance.nextGuidancePointName)
+        }
+        if (guidance.distanceToDestinationMeters in 0L..Int.MAX_VALUE.toLong()) {
+            send("distance", "updateDistanceToDestination", arrayOf(intType), guidance.distanceToDestinationMeters.toInt())
+        }
+        if (guidance.etaRemainingSeconds >= 0) {
+            send("eta", "updateEta", arrayOf(intType), guidance.etaRemainingSeconds)
+        }
+        if (guidance.turnId > 0) {
+            send("arrow", "updateTurnByTurnIcon", arrayOf(intType, String::class.java), 0, guidance.turnId.toString())
+        }
+        return EcarxResult(accepted, details.joinToString(" "))
     }
 
     /** The String overload is the SVG channel used by the factory navigation app. */

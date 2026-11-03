@@ -1,6 +1,7 @@
 package com.shilapi.xcertplay.hud
 
 import android.content.Context
+import android.cevt.dimsupportservice.DimSupportManager
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
@@ -89,9 +90,9 @@ class EcarxLaneGuidanceFlowTest {
         EcarxHudBridge.clear()
         DimInteraction.reset()
         for (name in listOf("context", "dim", "navi", "protocol", "dimCallback", "naviCallback",
-            "lastPushed", "lastArrowChannel", "presentedPackage", "lanes", "lastLanePushed")) set(name, null)
-        for (name in listOf("ecarxDetected", "presentationWanted", "releaseStalePresentation", "clusterVisibleWanted", "guidanceActive", "hudActive")) set(name, false)
-        for (name in listOf("presentationOption", "presentationCountdown", "presentationAttempts", "ticksSincePush")) set(name, 0)
+            "lastPushed", "lastArrowChannel", "lastNavigationRefreshOutcome", "presentedPackage", "lanes", "lastLanePushed")) set(name, null)
+        for (name in listOf("ecarxDetected", "presentationWanted", "releaseStalePresentation", "clusterVisibleWanted", "guidanceActive", "hudActive", "hudOutputTouched")) set(name, false)
+        for (name in listOf("presentationOption", "presentationCountdown", "presentationAttempts", "ticksSinceRefresh")) set(name, 0)
         // Only the scheduler is suppressed: tests explicitly run the production tick below.
         set("tickerStarted", true)
         route = field("route").get(EcarxHudBridge) as RouteGuidanceState
@@ -279,6 +280,75 @@ class EcarxLaneGuidanceFlowTest {
         send(0x5201) { u8(1, 0) }
         assertNull(route.current())
         assertFalse(panelRequests.last())
+        assertTrue(calls("updateNavigationInfo").isEmpty())
+        assertTrue(calls("notifyTurnByTurnStopped").isEmpty())
+        assertFactoryRestored()
+    }
+
+    @Test fun keepaliveRecoversAnArrowCachedBeforeASwallowedSendFailure() {
+        initialize(); maneuver()
+        NavigationOutputs.attachReport { reports += it }
+        NavigationOutputs.debugLogsEnabled = { false }
+        DimSupportManager.failedIconWrites = 2
+        guidance()
+        assertEquals(103, DimInteraction.navi.cachedArrowId)
+        assertFalse(DimSupportManager.writes.contains("icon:0:103"))
+        assertTrue(reports.any { "manager refresh accepted=false" in it })
+        repeat(5) {
+            guidance(distance = 349 - it)
+            assertEquals(2, DimSupportManager.iconAttempts)
+            tick()
+        }
+        assertTrue(DimSupportManager.writes.contains("icon:0:103"))
+        assertTrue(DimSupportManager.writes.contains("next:345:滨海路"))
+        assertTrue(reports.any { "manager refresh accepted=true" in it })
+        assertTrue(EcarxHudBridge.isActive())
+        assertTrue(calls("notifyTurnByTurnStopped").isEmpty())
+        assertTrue(calls("updateNavigationInfo").all { it.payload["getNavigationStatus"] == 1 })
+    }
+
+    @Test fun twentySourceChangesRefreshTheSameArrowWithoutClosingTheRoute() {
+        initialize(); maneuver(); guidance()
+        repeat(20) {
+            DimSupportManager.writes.clear()
+            assertTrue(NavigationOutputs.requestPresentation(context, false, "hide"))
+            assertTrue(NavigationOutputs.requestPresentation(context, true, "current source ready"))
+            assertTrue(DimSupportManager.writes.contains("icon:0:103"))
+            assertTrue(DimSupportManager.writes.contains("next:350:滨海路"))
+            assertTrue(DimSupportManager.writes.contains("distance:9876"))
+            assertTrue(DimSupportManager.writes.any { it.startsWith("eta:") })
+        }
+        assertTrue(EcarxHudBridge.isActive())
+        assertTrue(DimInteraction.navi.handlerNavigationActive)
+        assertFalse(DimInteraction.navi.navigationEvents.contains("naviAppOff"))
+        assertTrue(calls("notifyTurnByTurnStopped").isEmpty())
+    }
+
+    @Test fun managerRefreshDuringATurnGapDoesNotInventAnArrowOrNextDistance() {
+        initialize(); maneuver(); guidance()
+        send(0x5201) { u16List(0x0d, listOf(8)); u32(7, 6543); u64(6, 300) }
+        DimSupportManager.writes.clear()
+        repeat(5) { tick() }
+        assertTrue(DimSupportManager.writes.contains("distance:6543"))
+        assertTrue(DimSupportManager.writes.any { it.startsWith("eta:") })
+        assertFalse(DimSupportManager.writes.any { it.startsWith("icon:") || it.startsWith("next:") })
+        assertTrue(EcarxHudBridge.isActive())
+        assertTrue(calls("notifyTurnByTurnStopped").isEmpty())
+    }
+
+    @Test fun partiallyFailedFirstAggregateIsClearedBeforeFactoryNavigationReturns() {
+        installFactoryNavigation(); initialize()
+        set("navi", EcarxDimApi.NaviHandle(object : NaviFixture() {
+            override fun updateNavigationInfo(info: INaviInteraction.INavigationInfo) {
+                super.updateNavigationInfo(info)
+                if (info.navigationStatus == 1) throw IllegalStateException("partial aggregate")
+            }
+        }))
+        maneuver(); guidance()
+        assertEquals(listOf(1, 0), calls("updateNavigationInfo").map { it.payload["getNavigationStatus"] })
+        assertEquals(1, calls("notifyTurnByTurnStopped").size)
+        assertFalse(EcarxHudBridge.isActive())
+        assertNotNull(route.currentForDim())
         assertFactoryRestored()
     }
 
@@ -1300,14 +1370,15 @@ class EcarxLaneGuidanceFlowTest {
         assertEquals(listOf(true, false, true, false), panelRequests)
     }
 
-    @Test fun laneWithNoPushedManeuverClearsWithoutSendingNavigationStartOrStop() {
+    @Test fun prefetchedLanesAfterAPublishFailureDoNotClaimOrClearTheFactoryDisplay() {
         initialize(); maneuver()
         FixtureLog.failOnce("updateNavigationInfo")
         guidance()
+        val rollbackCalls = names().size
         send(0x5204) {
             u16(0, 42); u16(1, 0); group(2) { u16(0, 0); u8(1, 0); i16(2, 0) }
         }
-        assertTrue(calls("updateLaneInfo").isEmpty())
+        assertEquals(rollbackCalls, names().size)
         FixtureLog.reset()
         send(0x5201) { u8(1, 2) }
         assertTrue("Unowned prefetch must not clear the factory display", names().isEmpty())

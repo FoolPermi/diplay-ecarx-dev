@@ -34,8 +34,8 @@ import java.util.concurrent.TimeUnit
  *    `ecarx/naviservice/widget/f.smali` and pushes it through `updateTurnByTurnArrow(String)`
  *    (`ecarx/naviservice/a/g.smali`, log tag `NaviDashboardManager`); it never calls the `(Bitmap)`
  *    overload, and it skips the `int` overload entirely when the code is `<= 0`. So the SVG
- *    overload is the primary path here ([turnArrowSvg]); a locally drawn bitmap is the fallback for
- *    a head unit that lacks it, and the recovered code table ([EcarxArrowCode]) the last resort.
+ *    drawings are independent of the aggregate snapshot. Numeric ids ([EcarxArrowCode]) go first
+ *    here; [turnArrowSvg] and locally drawn bitmaps are fallbacks when that overload is missing.
  *  * **Needs calibration.** `getDrivingDirection()` is a bare `int` whose scale was never
  *    recovered, so it carries [DRIVING_DIRECTION_UNKNOWN] instead of Apple's flag dressed up as
  *    data. The arrow is still gated behind [EcarxOutputSettings.turnArrowExperimental] until the
@@ -47,7 +47,7 @@ import java.util.concurrent.TimeUnit
 internal object EcarxHudBridge {
     private const val TAG = "DiPlay-ECARX-HUD"
 
-    /** Re-send even when nothing changed, so the cluster never quietly drops the card. */
+    /** Recovery must run even when ordinary distance/ETA updates keep arriving. */
     private const val KEEPALIVE_TICKS = 5
 
     /** How many lines are held for a report that has not attached yet; see [report]. */
@@ -209,12 +209,15 @@ internal object EcarxHudBridge {
     private var lastRawOption: Int? = null
     /** Last arrow channel logged; the SDK call is still made on a forced refresh. */
     private var lastArrowChannel: String? = null
-    private var ticksSincePush = 0
+    private var lastNavigationRefreshOutcome: String? = null
+    private var ticksSinceRefresh = 0
     private var presentationOption = 0 // Unknown until DIM sends its first callback.
     private var clusterVisibleWanted = true
     private var routeAutoShowMap = true
     private var guidanceActive = false
     private var hudActive = false
+    // An aggregate may fail after partial writes, so cleanup tracks attempts as well as starts.
+    private var hudOutputTouched = false
     private var lastGuidanceEnd = "none"
 
     /**
@@ -605,7 +608,7 @@ internal object EcarxHudBridge {
     /** Reassert current HUD data after a ready source or an idle-time recovery call. */
     private fun resendLocked() {
         if (!guidanceActive || !hudActive || context?.let(EcarxOutputSettings::enabled) != true) return
-        ticksSincePush = 0
+        ticksSinceRefresh = 0
         pushLocked(force = true)
         if (!guidanceActive) return
         val naviRef = navi ?: return
@@ -644,9 +647,9 @@ internal object EcarxHudBridge {
                 }
             }
             watchProjectionLocked()
-            if (++ticksSincePush >= KEEPALIVE_TICKS || guidanceActive && route.currentForDim() == null) {
-                val force = ticksSincePush >= KEEPALIVE_TICKS
-                if (force) ticksSincePush = 0
+            if (++ticksSinceRefresh >= KEEPALIVE_TICKS || guidanceActive && route.currentForDim() == null) {
+                val force = ticksSinceRefresh >= KEEPALIVE_TICKS
+                if (force) ticksSinceRefresh = 0
                 pushLocked(force)
                 pushLaneLocked(force)
             }
@@ -707,7 +710,14 @@ internal object EcarxHudBridge {
                 if ((arrow.ok || svg.ok) && road.ok) lastPushed = null
                 lastArrowChannel = null
             }
-            if (hudEnabled && hudActive) publishRouteMetadata(naviRef, etaSeconds)
+            if (hudEnabled && hudActive) {
+                publishRouteMetadata(naviRef, etaSeconds)
+                if (force) refreshNavigationLocked(EcarxDimApi.Guidance(
+                    status = NAVI_STATUS_ACTIVE,
+                    distanceToDestinationMeters = route.remainingMeters ?: -1L,
+                    etaRemainingSeconds = etaSeconds,
+                ))
+            }
             return
         }
         lastWithdrawalOutcome = ""
@@ -728,11 +738,15 @@ internal object EcarxHudBridge {
         if (firstFrame) report(EcarxFactoryNavigationRestore.pauseForGuidance(app))
 
         // Order matches the toolkit: the aggregate payload first, then the discrete fields.
+        hudOutputTouched = true
         val result = EcarxDimApi.updateNavigationInfo(naviRef, guidance)
         if (!result.ok) {
             report("updateNavigationInfo failed next=${maneuver.distanceMeters}m: ${result.reason}")
-            if (firstFrame && !guidanceActive) report(EcarxFactoryNavigationRestore.restoreIfPausedByUs(app))
-            else endLocked("reason=aggregate-failed")
+            if (firstFrame && !guidanceActive) {
+                stopGuidanceOutputLocked()
+                hudOutputTouched = false
+                report(EcarxFactoryNavigationRestore.restoreIfPausedByUs(app))
+            } else endLocked("reason=aggregate-failed")
             return
         }
         if (firstFrame) {
@@ -772,8 +786,8 @@ internal object EcarxHudBridge {
         }
 
         val (remaining, eta) = publishRouteMetadata(naviRef, etaSeconds)
+        if (force || firstFrame) refreshNavigationLocked(guidance)
         lastPushed = guidance
-        ticksSincePush = 0
         if (NavigationOutputs.debugLogsEnabled()) report("DIM publish next=${maneuver.distanceMeters}m arrowId=${guidance.turnId} " +
             "status=${guidance.status} force=$force first=$firstFrame aggregate=${outcome(result)} " +
             "next=${outcome(nextPoint)} destination=${outcome(remaining)} eta=${outcome(eta)} " +
@@ -825,6 +839,16 @@ internal object EcarxHudBridge {
             if (result.ok) lastDestination = wanted
         }
         return remaining to eta
+    }
+
+    private fun refreshNavigationLocked(guidance: EcarxDimApi.Guidance) {
+        ticksSinceRefresh = 0
+        val result = EcarxDimApi.refreshNavigation(guidance, route.destinationName)
+        val state = "accepted=${result.ok} ${result.reason}"
+        if (state != lastNavigationRefreshOutcome || NavigationOutputs.debugLogsEnabled()) {
+            NavigationOutputs.diagnostic("route=$routeNumber manager refresh $state")
+        }
+        lastNavigationRefreshOutcome = state
     }
 
     private fun pushLaneLocked(force: Boolean) {
@@ -888,9 +912,8 @@ internal object EcarxHudBridge {
      * Sends the next-turn arrow on the best channel this head unit actually offers, and names the one
      * that took, for the report.
      *
-     * The numeric turn id goes first, and it is the only channel whose result can be trusted at all:
-     * every overload here is a `void` binder call, so `ok` means "the method existed and the binder
-     * accepted it", never "the cluster drew it". With the drawing channels ordered first, a call that
+     * The numeric turn id goes first. Every SDK overload returns void and can deduplicate or swallow
+     * a Binder error, so `ok` confirms method return only. With the drawing channels ordered first, a call that
      * was accepted and silently ignored would end the cascade — which is exactly what this project
      * spent weeks chasing. The id channel is the one the car has been observed to render (ids 101–143,
      * see [EcarxArrowCode]), so it is asked first and the drawings are kept as the answer for a head
@@ -912,6 +935,7 @@ internal object EcarxHudBridge {
 
     /** Withdraw HUD output while retaining the phone route, map intent and prefetched lanes. */
     private fun stopGuidanceOutputLocked() {
+        if (!hudOutputTouched) return
         val naviRef = navi
         if (naviRef != null) {
             // The recovered SDK's Stop only clears lanes/exits; idle resets its cached active state for the next start.
@@ -953,7 +977,8 @@ internal object EcarxHudBridge {
         }
         lastPushed = null
         lastArrowChannel = null
-        ticksSincePush = 0
+        lastNavigationRefreshOutcome = null
+        ticksSinceRefresh = 0
         hudActive = false
     }
 
@@ -981,6 +1006,7 @@ internal object EcarxHudBridge {
                 clusterPresentationRequested?.invoke(false)
             }
         } finally {
+            hudOutputTouched = false
             context?.let { report(EcarxFactoryNavigationRestore.restoreIfPausedByUs(it)) }
             NavigationOutputs.navigationExitFinished(reason.substringBefore(' '))
         }
