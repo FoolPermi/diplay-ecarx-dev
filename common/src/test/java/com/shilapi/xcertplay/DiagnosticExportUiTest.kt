@@ -1,6 +1,8 @@
 package com.shilapi.xcertplay
 
 import android.content.ActivityNotFoundException
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.os.Looper
 import android.view.View
@@ -28,6 +30,10 @@ class DiagnosticExportUiTest {
         val controller = Robolectric.buildActivity(DiPlayActivity::class.java).setup()
         val activity = controller.get()
         val context = activity.applicationContext
+        shadowOf(context.packageManager).installPackage(PackageInfo().apply {
+            packageName = "ecarx.naviservice"
+            applicationInfo = ApplicationInfo().apply { packageName = "ecarx.naviservice"; enabled = true }
+        })
         val authority = "${context.packageName}.diagnostic-reports"
         val info = context.packageManager.resolveContentProvider(authority, PackageManager.GET_META_DATA)!!
         ShadowContentResolver.registerProviderInternal(authority, DiagnosticReportProvider().apply { attachInfo(context, info) })
@@ -62,6 +68,9 @@ class DiagnosticExportUiTest {
             assertTrue(report.contains("Android media session:"))
             assertTrue(report.contains("CarPlay media dispatch since process start:"))
             assertTrue(report.contains("Cluster artwork:"))
+            assertTrue(report.contains("Navigation MQTT status="))
+            assertTrue(report.contains("ihu/info/phoneprojection count="))
+            assertTrue(report.contains("ihu/heartbeat/navigation count="))
             assertTrue(report.contains("Factory HiCar:"))
             assertTrue(report.contains("Platform signature check="))
             assertTrue(report.contains("USB devices:"))
