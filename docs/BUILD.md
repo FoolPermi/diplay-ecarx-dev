@@ -141,12 +141,11 @@ Different signing keys cannot update the same installed application.
 
 ## Build a release APK
 
-Prepare the runtime assets as described in the car-test procedure.
-Set these environment variables locally:
+Release automation signs the APK without bundling MFi authentication files.
+For a local build, set these signing variables and leave `DIPLAY_AUTH_ASSETS_DIR` unset:
 
 | Variable | Value |
 | --- | --- |
-| `DIPLAY_AUTH_ASSETS_DIR` | Absolute path to the runtime assets directory |
 | `ANDROID_KEYSTORE_PATH` | Path to your Android signing keystore |
 | `ANDROID_KEYSTORE_PASSWORD` | Keystore password |
 | `ANDROID_KEY_ALIAS` | Signing key alias |
@@ -160,10 +159,36 @@ Run the release checks and build:
 ```
 
 The output is `mobile/build/outputs/apk/release/mobile-release.apk`.
-The APK contains the runtime identity you supplied.
-Recipients can extract that identity from the APK.
 The APK excludes the Android signing key.
-See [the project notices](THIRD_PARTY_NOTICES.md) for the experimental identity used in public releases.
+An in-place update can reuse valid MFi files already installed in the app's private directory.
+A fresh install or cleared app data needs separately provisioned authentication or a supported hardware authenticator.
+For an explicit standalone local car-test build only, set `DIPLAY_AUTH_ASSETS_DIR` as described above.
+That opt-in embeds the runtime identity in the APK, where recipients can extract it.
+
+### GitHub Release automation
+
+The Android checks workflow runs tests, lint and source-only Debug builds on `dev`/`main` pushes and pull requests.
+Publishing a GitHub Release also runs those checks, then signs the main Release APK and attaches
+`DiPlay-release.apk` and `SHA256SUMS.txt` to that Release. A manually dispatched run builds the selected ref
+and uploads the same files as the `DiPlay-signed-release` Actions artifact without publishing a Release.
+
+The released tag must include the updated `.github/workflows/android.yml`.
+Creating a release branch, pushing a tag alone, or saving an unpublished draft does not publish an APK.
+Increment `mobile`'s `versionCode` before each new version; the workflow uses the checked-out source value.
+Version 122 supersedes the existing v121 vehicle package.
+
+Configure these repository Actions secrets:
+
+| Secret | Value |
+| --- | --- |
+| `ANDROID_KEYSTORE_BASE64` | Base64-encoded existing platform signing keystore |
+| `ANDROID_KEYSTORE_PASSWORD` | Keystore password |
+| `ANDROID_KEY_ALIAS` | Existing signing key alias |
+| `ANDROID_KEY_PASSWORD` | Signing key password |
+
+Only the Release job uses the secrets, after the checks pass. It restores the keystore in the runner's temporary
+directory, removes it after use, verifies the APK signature for Android 9, and rejects bundled MFi or key containers.
+No MFi secrets are required or uploaded. Keep the same signing identity for updates and vehicle platform permissions.
 
 The public source archive matches the release tag.
 It excludes runtime identities, signing keys, local configuration, and build output.

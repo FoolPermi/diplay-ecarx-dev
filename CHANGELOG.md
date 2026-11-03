@@ -1,10 +1,15 @@
 # DiPlay ECARX 0.2 — 未发布
 
 基线升级至上游 [DiPlay v0.2.22](https://github.com/shihabal3amri/DiPlay/releases/tag/v0.2.22)，
-`versionCode 114`。保留 ECARX 的应用标识、可选本地认证资产和签名配置。
+`versionCode 122`。保留 ECARX 的应用标识、可选本地认证资产和签名配置。
 合并取舍与验收项见 [升级记录](docs/UPSTREAM-0.2.22-INTEGRATION.md)。
 
 使用手册正文已跟进到本段实现；页面截图仍是 v106 实车画面，各节标注了后续版本的实测状态。
+
+## Release 自动构建
+
+- 发布 GitHub Release 后先运行仓库检查，再使用 Actions Secrets 中的现有平台密钥签名，上传 APK 与 SHA-256 校验文件；手动触发时提供 Actions 构建产物。
+- 自动发布包不包含 MFi 认证文件。覆盖安装可复用应用私有目录中的有效认证；全新安装或清除数据后需另行提供认证。版本号升至 122，避免低于已安装的 v121。
 
 ## 上游更新检查
 
