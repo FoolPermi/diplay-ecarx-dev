@@ -153,18 +153,11 @@ class AudioStream(
                 }
                 val rtp = wire.copyOf(RTP_HEADER_LEN) + payload
                 val decryptedNumber = decryptedPackets.incrementAndGet()
-                if (decryptedNumber <= FIRST_PACKET_LOG_COUNT) {
+                if (decryptedNumber == 1) {
                     android.util.Log.i(
                         TAG,
                         "audio stream type=$streamType packet=$decryptedNumber sample=$sample " +
-                            "wireBytes=${wire.size} payloadBytes=${payload.size} " +
-                            "payloadHead=${payload.copyOf(minOf(payload.size, 16)).toHexString()}",
-                    )
-                } else if (decryptedNumber % PACKET_LOG_INTERVAL == 0) {
-                    android.util.Log.i(
-                        TAG,
-                        "audio stream type=$streamType decrypted=$decryptedNumber " +
-                            "authFailures=${authenticationFailures.get()}",
+                            "wireBytes=${wire.size} payloadBytes=${payload.size}",
                     )
                 }
                 listener.onPacket(wire, rtp, sample, null)
@@ -213,8 +206,6 @@ class AudioStream(
         const val TAG_LEN = 16
         const val NONCE_LEN = 8
         const val TAIL_LEN = TAG_LEN + NONCE_LEN
-        const val FIRST_PACKET_LOG_COUNT = 3
-        const val PACKET_LOG_INTERVAL = 100
     }
 }
 

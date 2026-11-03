@@ -9,7 +9,6 @@ import android.media.MediaRecorder
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
 import androidx.annotation.RequiresApi
 
 /**
@@ -56,13 +55,10 @@ internal class VoipCallWatcher(context: Context, private val onChange: (Boolean)
         recordings?.let { list -> recordingSources = list.map { it.clientAudioSource } }
         playbacks?.let { list -> playbackUsages = list.mapNotNull { it.audioAttributes?.usage } }
         val voip = voipActive(recordingSources, playbackUsages) && !PhoneAudioRoute.ownCarPlayCallActive()
-        Log.i(TAG, "recording sources=$recordingSources playback usages=$playbackUsages voip=$voip")
         onChange(voip)
     }
 
     companion object {
-        private const val TAG = "DiPlay-PhoneAudio"
-
         fun voipActive(recordingSources: List<Int>, playbackUsages: List<Int>): Boolean =
             recordingSources.any { it == MediaRecorder.AudioSource.VOICE_COMMUNICATION } &&
                 playbackUsages.any { it == AudioAttributes.USAGE_VOICE_COMMUNICATION }
