@@ -112,8 +112,6 @@ object NavigationOutputs {
         return EcarxHudBridge.applyPresentation(show, origin).ok
     }
 
-    fun onClusterWindowHidden() = EcarxHudBridge.onClusterWindowHidden()
-
     fun diagnosticReport(context: Context): String = EcarxHudBridge.diagnostics(context)
 
     /**

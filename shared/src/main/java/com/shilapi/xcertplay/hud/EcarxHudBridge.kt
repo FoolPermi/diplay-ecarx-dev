@@ -184,7 +184,6 @@ internal object EcarxHudBridge {
      * open, null when none is. Printed by [diagnostics] so a report can tell "the switch is off" from
      * "the switch is off but the platform still has a session open".
      */
-    private var dismissedTurnRoute: Long? = null
     private var presentedPackage: String? = null
 
     private var lastPushed: EcarxDimApi.Guidance? = null
@@ -579,37 +578,13 @@ internal object EcarxHudBridge {
             report("presentation switch failed: ${result.reason}")
             return result
         }
-        val wasShown = presentedPackage != null
         presentedPackage = if (show) packageName else null
         if (!show) {
             context?.let { EcarxOutputSettings.setPresentationReleasePending(it, false) }
         }
         resendLocked()
-        if (show) {
-            dismissedTurnRoute = null
-            if (!wasShown) replayCurrentTurnLocked(true)
-        } else if (wasShown && guidanceActive && !clusterVisibleWanted) {
-            dismissedTurnRoute = routeNumber
-        }
         if (NavigationOutputs.debugLogsEnabled()) report("presentation switch -> $show package=\"$packageName\"")
         return result
-    }
-
-    fun onClusterWindowHidden() = synchronized(lock) {
-        val hiddenRoute = dismissedTurnRoute
-        dismissedTurnRoute = null
-        if (hiddenRoute == routeNumber && !clusterVisibleWanted && !presentationWanted) replayCurrentTurnLocked(false)
-    }
-
-    // AdaptAPI deduplicates the unchanged arrow and distance even after the layout loses them.
-    private fun replayCurrentTurnLocked(shown: Boolean) {
-        if (!guidanceActive || currentSession?.invoke() == false) return
-        val maneuver = route.currentForDim() ?: return
-        val g = guidanceFor(maneuver)
-        val svg = if (lastArrowChannel?.startsWith("svg:") == true) turnArrowSvg(maneuver.type, maneuver.drivingSide) else null
-        val id = g.turnId.takeIf { lastArrowChannel == "id:$it" }
-        val outcome = EcarxDimApi.replayTurn(id, svg, maneuver.distanceMeters, maneuver.road)
-        NavigationOutputs.diagnostic("route=$routeNumber turn replay map=$shown nextMeters=${maneuver.distanceMeters} $outcome")
     }
 
     /** Both firstFrameReady and naviAppOff replace DIM's cached event; restore live guidance after either. */
@@ -942,7 +917,6 @@ internal object EcarxHudBridge {
                     "distance=${outcome(distance)} road=${outcome(road)} destination=${outcome(address)}")
                 clearLanesLocked(force = true)
             }
-            dismissedTurnRoute = null
             lastPushed = null
             lastArrowChannel = null
             ticksSincePush = 0
