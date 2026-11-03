@@ -3,6 +3,8 @@ package com.shilapi.xcertplay.hud
 import android.content.Context
 import com.shilapi.xcertplay.iap2.wire.Iap2Frame
 
+enum class ClusterMapIntent { NO_ROUTE, HIDDEN, SHOWN }
+
 /**
  * Nonblocking boundary between phone control messages and the head unit's instrument-cluster service.
  *
@@ -142,11 +144,11 @@ object NavigationOutputs {
      * the request and return: it is "a route wants the panel", not "the panel is up now". This seam
      * exists because [EcarxHudBridge] is internal to this module while the activity is not.
      */
-    fun setClusterPanelOwner(owner: ((Boolean) -> Unit)?) {
+    fun setClusterPanelOwner(owner: ((ClusterMapIntent) -> Unit)?) {
         EcarxHudBridge.setClusterPanelOwner(owner)
     }
 
-    fun clearClusterPanelOwner(expected: (Boolean) -> Unit) {
+    fun clearClusterPanelOwner(expected: (ClusterMapIntent) -> Unit) {
         EcarxHudBridge.clearClusterPanelOwner(expected)
     }
 

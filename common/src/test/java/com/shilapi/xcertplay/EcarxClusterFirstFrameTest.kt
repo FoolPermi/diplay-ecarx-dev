@@ -6,6 +6,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.Surface
 import com.shilapi.xcertplay.airplay.AirPlaySession
+import com.shilapi.xcertplay.hud.ClusterMapIntent.*
 import com.shilapi.xcertplay.hud.NavigationOutputs
 import com.shilapi.xcertplay.media.AndroidMediaSink
 import com.shilapi.xcertplay.orchestration.CarPlayController
@@ -74,7 +75,7 @@ class EcarxClusterFirstFrameTest {
     }
 
     @Test fun routeAndSurfaceCannotBypassTheCurrentSessionsFirstMainFrame() {
-        output.onRouteRequested(true)
+        output.onRouteRequested(SHOWN)
         idle()
         assertTrue(panels.constructed().isEmpty())
         onSurface(surface)
@@ -131,11 +132,11 @@ class EcarxClusterFirstFrameTest {
 
     @Test fun routeEndDisconnectAndRestartClearOnlyTheirOwnSurface() {
         open()
-        output.onRouteRequested(false)
+        output.onRouteRequested(NO_ROUTE)
         idle()
         verify(sink).clearSurface(111, surface)
         verify(panels.constructed().single()).dismiss()
-        output.onRouteRequested(true)
+        output.onRouteRequested(SHOWN)
         idle()
         onSurface(surface)
         `when`(controller.activeAirPlaySession()).thenReturn(null)
@@ -148,23 +149,45 @@ class EcarxClusterFirstFrameTest {
         assertNull(ReflectionHelpers.getField(CarPlayBackgroundSession, "clusterOutput"))
     }
 
-    @Test fun hidingAndRestoringThePanelUpdatesThePhonesSecondaryUi() {
+    @Test fun hidingAndRestoringReusesTheLiveMapAndAnnouncesItsReadinessAgain() {
         open()
-        clearInvocations(controller)
-        output.onRouteRequested(false)
+        frameCallbacks.single()(surface)
         idle()
-        verify(controller, atLeastOnce()).setClusterOutputVisible(false)
-        verify(controller, never()).setClusterOutputVisible(true)
-        clearInvocations(controller)
-        output.onRouteRequested(true)
+        clearInvocations(controller, sink)
+        events.clear()
+        repeat(2) { output.onRouteRequested(HIDDEN); idle() }
+        verify(controller, never()).setClusterOutputVisible(false)
+        verify(sink, never()).clearSurface(111, surface)
+        verify(panels.constructed().single(), never()).dismiss()
+        assertFalse(events.any { "presentation request" in it })
+        repeat(2) { output.onRouteRequested(SHOWN); idle() }
+        assertEquals(1, events.count { "presentation request show=true" in it })
+        assertEquals(1, panels.constructed().size)
+        output.onRouteRequested(HIDDEN)
+        output.onRouteRequested(NO_ROUTE)
         idle()
-        onSurface(surface)
-        verify(controller, atLeastOnce()).setClusterOutputVisible(true)
+        verify(sink).clearSurface(111, surface)
+        verify(panels.constructed().single()).dismiss()
+    }
+
+    @Test fun aRouteStartingHiddenPreparesItsMapWithoutSelectingItOnTheCluster() {
+        `when`(session.hasRenderedMainFrame).thenReturn(true)
+        output.onRouteRequested(HIDDEN)
+        idle()
+        surfaceCallbacks.single()(surface)
+        verify(sink).setSurface(111, surface)
+        frameCallbacks.single()(surface)
+        idle()
+        assertFalse(events.any { "presentation request show=true" in it })
+        output.onRouteRequested(SHOWN)
+        idle()
+        assertEquals(1, events.count { "presentation request show=true" in it })
+        verify(panels.constructed().single(), never()).dismiss()
     }
 
     @Test fun theWindowWaitsForAValidSurfaceBeforeClaimingProjectionOrPhoneUi() {
         `when`(session.hasRenderedMainFrame).thenReturn(true)
-        output.onRouteRequested(true)
+        output.onRouteRequested(SHOWN)
         idle()
         assertEquals(1, panels.constructed().size)
         verify(controller, never()).setClusterOutputVisible(true)
@@ -187,7 +210,7 @@ class EcarxClusterFirstFrameTest {
         CarPlayBackgroundSession.store(next, nextSink, 1920, 1080, Any(), display) {}
         CarPlayBackgroundSession.bindClusterOutput(app, next)
         val replacement = ReflectionHelpers.getField<EcarxClusterSession>(CarPlayBackgroundSession, "clusterOutput")
-        replacement.onRouteRequested(true)
+        replacement.onRouteRequested(SHOWN)
         idle()
         CarPlayBackgroundSession.clear(controller)
         output.close()
@@ -211,9 +234,9 @@ class EcarxClusterFirstFrameTest {
 
     @Test fun lateSurfaceCallbacksFromAnOldWindowCannotDetachTheReplacement() {
         open()
-        output.onRouteRequested(false)
+        output.onRouteRequested(NO_ROUTE)
         idle()
-        output.onRouteRequested(true)
+        output.onRouteRequested(SHOWN)
         idle()
         val replacement = mock(Surface::class.java)
         surfaceCallbacks.last()(replacement)
@@ -229,7 +252,7 @@ class EcarxClusterFirstFrameTest {
         val mirrored = mock(AirPlaySession::class.java)
         `when`(mirrored.hasRenderedMainFrame).thenReturn(true)
         `when`(controller.activeAirPlaySession()).thenReturn(mirrored)
-        output.onRouteRequested(true)
+        output.onRouteRequested(SHOWN)
         idle()
         onSurface(surface)
         verify(sink).setMirrorSurface(110, "ecarx-cluster-main", surface)
@@ -288,21 +311,21 @@ class EcarxClusterFirstFrameTest {
         idle()
         assertTrue(NavigationOutputs.diagnosticReport(app).contains("projectionWanted=true"))
 
-        output.onRouteRequested(false)
+        output.onRouteRequested(NO_ROUTE)
         frameCallbacks.last()(replacement) // Intent changed before the queued window hide.
         idle()
         assertFalse(NavigationOutputs.diagnosticReport(app).contains("projectionWanted=true"))
-        output.onRouteRequested(true)
+        output.onRouteRequested(SHOWN)
         idle()
         onSurface(replacement)
         frameCallbacks.first()(replacement) // The dismissed window cannot arm the replacement.
         idle()
         assertFalse(NavigationOutputs.diagnosticReport(app).contains("projectionWanted=true"))
-        output.onRouteRequested(false)
+        output.onRouteRequested(NO_ROUTE)
         frameCallbacks.last()(replacement) // Hidden before this binding received its first frame.
         idle()
         assertFalse(NavigationOutputs.diagnosticReport(app).contains("projectionWanted=true"))
-        output.onRouteRequested(true)
+        output.onRouteRequested(SHOWN)
         idle()
         onSurface(replacement)
         frameCallbacks.last()(replacement)
@@ -318,7 +341,7 @@ class EcarxClusterFirstFrameTest {
             if (fail) doThrow(IllegalStateException("private display name")).`when`(panel).show()
         }
         `when`(session.hasRenderedMainFrame).thenReturn(true)
-        output.onRouteRequested(true)
+        output.onRouteRequested(SHOWN)
         idle()
         output.onSessionChanged()
         idle()
@@ -334,7 +357,7 @@ class EcarxClusterFirstFrameTest {
         open()
         events.clear()
         repeat(3) {
-            output.onRouteRequested(true)
+            output.onRouteRequested(SHOWN)
             output.onSessionChanged()
             idle()
             frameCallbacks.last()(surface)
@@ -343,9 +366,9 @@ class EcarxClusterFirstFrameTest {
         assertTrue(events.single { "panel video first-frame" in it }.contains("physicalDisplay=unobserved"))
         assertTrue(events.none { "panel intent" in it })
 
-        output.onRouteRequested(false)
+        output.onRouteRequested(NO_ROUTE)
         idle()
-        output.onRouteRequested(true)
+        output.onRouteRequested(SHOWN)
         idle()
         onSurface(surface)
         frameCallbacks.first()(surface)
@@ -364,7 +387,7 @@ class EcarxClusterFirstFrameTest {
 
     private fun open() {
         `when`(session.hasRenderedMainFrame).thenReturn(true)
-        output.onRouteRequested(true)
+        output.onRouteRequested(SHOWN)
         idle()
         onSurface(surface)
     }

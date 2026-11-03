@@ -104,7 +104,7 @@ class EcarxLaneGuidanceFlowTest {
         context.getSharedPreferences("diplay_ecarx_outputs_v2", Context.MODE_PRIVATE).edit().clear().commit()
         context.getSharedPreferences("diplay_factory_navigation_control", Context.MODE_PRIVATE).edit().clear().commit()
         EcarxOutputSettings.setMediaEnabled(context, false)
-        NavigationOutputs.setClusterPanelOwner { panelRequests += it }
+        NavigationOutputs.setClusterPanelOwner { panelRequests += (it == ClusterMapIntent.SHOWN) }
         EcarxHudBridge.attachReport { reports += it }
         reports.clear()
         panelRequests.clear()
@@ -530,24 +530,28 @@ class EcarxLaneGuidanceFlowTest {
 
     @Test fun allDisplayControlsShareIntentAndRepeatedEventsRepairThePanel() {
         initialize(); maneuver(); guidance()
+        val intents = mutableListOf<ClusterMapIntent>()
+        NavigationOutputs.setClusterPanelOwner { intents += it }
         NavigationOutputs.requestPresentation(context, true, "cluster surface ready")
         fun fly(option: Int) {
             DimInteraction.instance().callback.onShowPresentationOptionChanged(option)
             shadowOf(Looper.getMainLooper()).idle()
         }
         fly(3); fly(3); fly(-1)
-        assertEquals(listOf(true, false, false), panelRequests)
+        assertEquals(listOf(ClusterMapIntent.SHOWN, ClusterMapIntent.HIDDEN, ClusterMapIntent.HIDDEN), intents)
         val before = calls("setPresentationToDimSwitch").size
         assertFalse(NavigationOutputs.requestPresentation(context, true, "stale surface"))
         repeat(25) { tick() }
         assertEquals(before, calls("setPresentationToDimSwitch").size)
-        NavigationOutputs.requestPresentation(context, false, "cluster surface detached")
+        assertFalse(field("presentationWanted").getBoolean(EcarxHudBridge))
         fly(2); fly(2)
-        assertEquals(listOf(true, false, false, true, true), panelRequests)
+        assertEquals(listOf(ClusterMapIntent.SHOWN, ClusterMapIntent.SHOWN), intents.takeLast(2))
         assertTrue(field("clusterVisibleWanted").getBoolean(EcarxHudBridge))
         fly(1)
-        assertTrue(panelRequests.last())
+        assertEquals(ClusterMapIntent.SHOWN, intents.last())
         assertEquals(1, field("presentationOption").getInt(EcarxHudBridge))
+        send(0x5201) { u8(1, 0) }
+        assertEquals(ClusterMapIntent.NO_ROUTE, intents.last())
     }
 
     @Test fun navigationDetailsFollowTheDebugSwitchWithoutStoppingOutput() {
@@ -1299,7 +1303,7 @@ class EcarxLaneGuidanceFlowTest {
     @Test fun failedPanelCleanupOnTimeoutStillStopsGuidance() {
         installFactoryNavigation(); initialize()
         maneuver(); guidance()
-        NavigationOutputs.setClusterPanelOwner { if (!it) error("panel cleanup failed") }
+        NavigationOutputs.setClusterPanelOwner { if (it == ClusterMapIntent.NO_ROUTE) error("panel cleanup failed") }
         nowNs += 30_000_000_000L
         tick()
         assertFalse(EcarxHudBridge.isActive())
