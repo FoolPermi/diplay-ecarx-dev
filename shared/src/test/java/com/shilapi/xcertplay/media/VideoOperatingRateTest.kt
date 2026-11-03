@@ -43,9 +43,10 @@ class VideoOperatingRateTest {
     }
 
     @Test fun onlyQualcommDecodersGetTheVendorLowLatencyKeys() {
-        val keys = listOf("vendor.qti-ext-dec-low-latency.enable", "vendor.qti-ext-dec-picture-order.enable")
+        val keys = listOf("vendor.qti-ext-dec-low-latency.enable")
         assertEquals(keys, vendorLowLatencyKeys("c2.qti.avc.decoder"))
         assertEquals(keys, vendorLowLatencyKeys("OMX.qcom.video.decoder.avc"))
+        assertEquals(keys, vendorLowLatencyKeys("omx.qcom.video.decoder.avc"))
         assertEquals(emptyList<String>(), vendorLowLatencyKeys("c2.mtk.avc.decoder"))
         assertEquals(emptyList<String>(), vendorLowLatencyKeys("c2.android.avc.decoder"))
     }

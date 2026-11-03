@@ -985,15 +985,14 @@ internal fun videoDecoderAttempts(
 internal fun nextOperatingRate(requested: Int, used: DecoderAttempt?): Int =
     if (requested > 0 && used != null && used.operatingRate == 0) 0 else requested
 
-/**
- * Qualcomm's vendor parameters that make its decoders output each frame as soon as it is decoded, in
- * decode order: without them c2.qti.avc.decoder released a frame only after about two more had been
- * queued (docs/SMOOTH_WIRELESS.md). Empty for other decoders. CarPlay's screen stream has no B-frames,
- * so decode order is display order.
+/** Qualcomm's private request can be submitted to older OMX drivers, including on API 28.
+ * Picture order is separate: do not request it here without a guarantee of no reordered frames.
  */
+internal const val QTI_LOW_LATENCY_PARAMETER = "vendor.qti-ext-dec-low-latency.enable"
 internal fun vendorLowLatencyKeys(codecName: String): List<String> =
-    if (codecName.startsWith("c2.qti.") || codecName.startsWith("OMX.qcom.")) {
-        listOf("vendor.qti-ext-dec-low-latency.enable", "vendor.qti-ext-dec-picture-order.enable")
+    if (codecName.startsWith("c2.qti.", ignoreCase = true) ||
+        codecName.startsWith("OMX.qcom.", ignoreCase = true)) {
+        listOf(QTI_LOW_LATENCY_PARAMETER)
     } else emptyList()
 
 /** One regular decoder of the stream's type, as [lowLatencyDecoderName] sees it. */
@@ -1084,6 +1083,7 @@ private class VideoDecoder(
     private var configuredMtkCodec2LowLatency = false
     // Whether the vendor low-latency parameters were set on the codec being configured.
     private var configuredVendorLowLatency = false
+    private var vendorLowLatencyRefused = false
     // Likewise the low-latency decoder, not tried again once another decoder had to take over; and what the
     // codec that tryConfigure started last was given.
     private var lowLatencyDecoderRefused = false
@@ -1246,6 +1246,7 @@ private class VideoDecoder(
         // MTK vendor failures may surface as CodecException or the broader IllegalStateException.
         // Retire the active experimental mode before recreating the decoder.
         if (error is IllegalStateException) {
+            dropVendorLowLatency("codec failed during $stage")
             dropMtkTuning("codec failed during $stage")
             dropMtkCodec2LowLatency("codec failed during $stage")
         }
@@ -1377,7 +1378,9 @@ private class VideoDecoder(
         }
         if (configured != null) {
             val rate = if (requestedRate > 0) " operatingRate=$configuredRate" else ""
-            val lowLatency = if (vendorLowLatency) " vendorLowLatency=$configuredVendorLowLatency" else ""
+            val lowLatency = " qtiLowLatencyRequested=$vendorLowLatency" +
+                " qtiLowLatencySubmitted=$configuredVendorLowLatency" +
+                " qtiLowLatencyFallback=$vendorLowLatencyRefused effectiveness=unverified"
             val output = if (outputThread != null) " outputThread=true" else ""
             val atOnceReport = if (atOnce) " lowLatency=$startedLowLatency pictureOrder=$startedPictureOrder" else ""
             val mtk = when {
@@ -1393,6 +1396,12 @@ private class VideoDecoder(
                 "video decoder configured name=${configured.codecName} mime=$mime size=${width}x$height$mtk",
             )
         }
+    }
+
+    private fun dropVendorLowLatency(reason: String) {
+        if (!configuredVendorLowLatency || vendorLowLatencyRefused) return
+        vendorLowLatencyRefused = true
+        report("QTI low-latency fallback: $reason; next=without-private-parameters for this stream")
     }
 
     private fun dropOperatingRate(reason: String) {
@@ -1448,6 +1457,7 @@ private class VideoDecoder(
     ): ConfiguredVideoDecoder? {
         var candidate: MediaCodec? = null
         var mtkMode = MtkDecoderMode.NONE
+        var vendorKeys = emptyList<String>()
         var codecName = attempt.codecName ?: "default"
         var phase = "create"
         var phaseStartNs = System.nanoTime()
@@ -1464,15 +1474,24 @@ private class VideoDecoder(
             val lowLatency = attempt.tuned && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
                 codec.codecInfo.getCapabilitiesForType(mime).isFeatureSupported("low-latency")
             if (lowLatency) format.setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
-            val vendorKeys = if (attempt.tuned && vendorLowLatency) vendorLowLatencyKeys(codec.name.orEmpty()) else emptyList()
+            vendorKeys = if (attempt.tuned && vendorLowLatency && !vendorLowLatencyRefused) {
+                vendorLowLatencyKeys(createdName)
+            } else emptyList()
             vendorKeys.forEach { format.setInteger(it, 1) }
-            configuredVendorLowLatency = vendorKeys.isNotEmpty()
-            val pictureOrder = attempt.tuned && atOnce && listsPictureOrder(codec)
+            val pictureOrder = attempt.tuned && atOnce && !vendorLowLatencyRefused && listsPictureOrder(codec)
             if (pictureOrder) format.setInteger(PICTURE_ORDER_PARAMETER, 1)
+            if (vendorKeys.isNotEmpty()) {
+                report("QTI low-latency attempt decoder=$codecName api=${Build.VERSION.SDK_INT} " +
+                    "request=${vendorKeys.joinToString { "$it=1" }} pictureOrder=$pictureOrder")
+            }
             codec.configure(format, surface, null, 0)
             phase = "start"
             phaseStartNs = System.nanoTime()
             codec.start()
+            configuredVendorLowLatency = vendorKeys.isNotEmpty()
+            if (configuredVendorLowLatency) {
+                report("QTI low-latency configure/start returned decoder=$codecName; effectiveness=unverified")
+            }
             startedLowLatency = lowLatency
             startedPictureOrder = pictureOrder
             val configuredName = runCatching { codec.name }.getOrNull().orEmpty()
@@ -1486,6 +1505,7 @@ private class VideoDecoder(
                 Log.w(TAG, "video decoder candidate release failed name=$codecName", it)
             }
             reportFailure("stage=configure phase=$phase phaseMs=$phaseMs elapsedMs=$elapsedMs " +
+                "decoder=$codecName qtiRequest=${vendorKeys.joinToString()} " +
                 "tuned=${attempt.tuned} operatingRate=${attempt.operatingRate} " +
                 "mtkTuning=${mtkMode.diagnosticName} mime=$mime", error)
             Log.w(
@@ -1495,7 +1515,12 @@ private class VideoDecoder(
                     "mtkTuning=${mtkMode.diagnosticName} mime=$mime size=${width}x$height",
                 error,
             )
-            null
+            if (vendorKeys.isNotEmpty()) {
+                vendorLowLatencyRefused = true
+                report("QTI low-latency fallback decoder=$codecName phase=$phase; " +
+                    "retry=same-format-without-private-parameters for this stream")
+                tryConfigure(mime, csd, surface, attempt, atOnce)
+            } else null
         }
     }
 
@@ -1645,6 +1670,7 @@ private class VideoDecoder(
             dequeue = { codec.dequeueInputBuffer(INPUT_TIMEOUT_US) },
         )
         if (index < 0) {
+            dropVendorLowLatency("video decoder input stalled")
             dropMtkTuning("video decoder input stalled")
             dropMtkCodec2LowLatency("video decoder input stalled")
             recover("video decoder input stalled")
@@ -1754,6 +1780,8 @@ private class VideoDecoder(
                 if (shown && !renderedFrameLogged) {
                     renderedFrameLogged = true
                     report("first frame rendered")
+                    if (vendorLowLatency) report("QTI first output released for rendering " +
+                        "qtiLowLatencySubmitted=$configuredVendorLowLatency effectiveness=unverified")
                     Log.i(TAG, "video decoder rendered first frame bytes=${info.size}")
                 }
                 if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) return false
@@ -1764,6 +1792,12 @@ private class VideoDecoder(
     }
 
     private fun logOutputFormat(format: MediaFormat) {
+        if (vendorLowLatency) {
+            report("QTI driver-reported output format " +
+                "$QTI_LOW_LATENCY_PARAMETER=${format.intOrNull(QTI_LOW_LATENCY_PARAMETER) ?: "unreported"} " +
+                "$PICTURE_ORDER_PARAMETER=${format.intOrNull(PICTURE_ORDER_PARAMETER) ?: "unreported"}; " +
+                "effectiveness=unverified (reported values may be stale; unreported is not unsupported)")
+        }
         report("output format requested=${width}x${height} " +
             "coded=${format.intOrNull(MediaFormat.KEY_WIDTH)}x${format.intOrNull(MediaFormat.KEY_HEIGHT)} " +
             "crop=${format.intOrNull("crop-left")},${format.intOrNull("crop-top")}," +
@@ -1804,6 +1838,7 @@ private class VideoDecoder(
         configuredRate = 0
         configuredMtkMode = MtkDecoderMode.NONE
         configuredMtkCodec2LowLatency = false
+        configuredVendorLowLatency = false
         if (codec != null) {
             try {
                 codec.stop()
