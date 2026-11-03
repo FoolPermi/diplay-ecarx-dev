@@ -26,11 +26,16 @@ class ClusterArtworkServerTest {
         val url = URL(first)
         try {
             assertEquals("127.0.0.1", url.host)
-            val connection = url.openConnection() as HttpURLConnection
-            try {
-                assertEquals("image/png", connection.contentType)
-                assertArrayEquals(cover, connection.inputStream.use { it.readBytes() })
-            } finally { connection.disconnect() }
+            // Read through connection close so the server has also finished its request accounting.
+            val response = Socket(url.host, url.port).use { socket ->
+                socket.soTimeout = 3_000
+                socket.getOutputStream().write("GET ${url.path} HTTP/1.1\r\n\r\n".toByteArray())
+                socket.getInputStream().readBytes()
+            }
+            val headers = response.toString(Charsets.ISO_8859_1).substringBefore("\r\n\r\n")
+            assertTrue(headers.startsWith("HTTP/1.1 200 OK\r\n"))
+            assertTrue(headers.contains("Content-Type: image/png\r\n"))
+            assertArrayEquals(cover, response.copyOfRange(headers.length + 4, response.size))
             assertTrue(server.diagnosticReport().contains("published=1 requests=1 served=1 notFound=0"))
             repeat(4) { server.publish(byteArrayOf(it.toByte())) }
             val expired = url.openConnection() as HttpURLConnection
