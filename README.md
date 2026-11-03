@@ -42,7 +42,7 @@ Where each feature is enabled, what it needs first, and how to tell it works: [f
 
 | Feature | Settings |
 | --- | --- |
-| Cluster and HUD navigation | **Settings → Navigation → ECARX navigation**: enable “Navigation on the instrument cluster” |
+| Cluster and HUD navigation | **Settings → Navigation → ECARX navigation**: enable “HUD and cluster guidance” |
 | Lane guidance | On the same page, enable “Cluster lane guidance” |
 | Song information and artwork | **Settings → Audio → Vehicle media integration**: choose “DiPlay direct” or “HY proxy”; song data follows the backend |
 | Day/night following the vehicle | **Settings → Display → Display and performance**: set “CarPlay day/night mode” to “Follow the vehicle” |
