@@ -2272,10 +2272,12 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         settingsPageTitle(content, getString(R.string.about_diplay), getString(R.string.carplay_at_home_in_your_car))
         section(content, getString(R.string.about_public_preview_prefix, version())) { card ->
             card.addView(label(getString(R.string.an_independent_carplay_receiver_for_android_head_units_wir), 17, TEXT))
-            card.addView(updateRow())
-            toggle(card, getString(R.string.settings_background_update_checks),
-                getString(R.string.settings_background_update_checks_description),
-                UpdateAvailability.backgroundChecksEnabled(this)) { UpdateAvailability.saveBackgroundChecksEnabled(this, it) }
+            if (UpdateAvailability.ENABLED) {
+                card.addView(updateRow())
+                toggle(card, getString(R.string.settings_background_update_checks),
+                    getString(R.string.settings_background_update_checks_description),
+                    UpdateAvailability.backgroundChecksEnabled(this)) { UpdateAvailability.saveBackgroundChecksEnabled(this, it) }
+            }
         }
         section(content, getString(R.string.backup_title)) { card ->
             card.addView(button(getString(R.string.backup_open), false) { openBackup() }, matchButton(0, 60))

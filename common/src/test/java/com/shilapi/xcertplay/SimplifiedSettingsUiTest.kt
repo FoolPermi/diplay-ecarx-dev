@@ -44,6 +44,20 @@ class SimplifiedSettingsUiTest {
         activity.finish()
     }
 
+    @Test fun aboutHidesUpstreamUpdateControlsAtHeadUnitSize() {
+        val root = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(DiPlayPalette.DARK.surface)
+        }
+        ReflectionHelpers.callInstanceMethod<Unit>(activity, "about",
+            ReflectionHelpers.ClassParameter.from(LinearLayout::class.java, root))
+        assertTrue(hasTitle(root, R.string.about_diplay))
+        assertTrue(hasTitle(root, R.string.backup_open))
+        assertFalse(hasTitle(root, R.string.update_check))
+        assertFalse(hasTitle(root, R.string.settings_background_update_checks))
+        screenshot(root, "about-upstream-updates-disabled")
+    }
+
     @Test fun soundOutputDialogShowsMediaAndNavigationTestsAtHeadUnitSize() {
         ReflectionHelpers.callInstanceMethod<Unit>(activity, "showSoundOutputTest")
         val dialog = requireNotNull(ShadowAlertDialog.getLatestAlertDialog())

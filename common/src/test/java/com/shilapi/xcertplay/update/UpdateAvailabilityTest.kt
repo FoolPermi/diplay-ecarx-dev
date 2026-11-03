@@ -19,29 +19,31 @@ class UpdateAvailabilityTest {
 
     @After fun clear() = UpdateAvailability.clearAllForTest(context)
 
-    @Test fun persistsAReleaseThatIsNewerThanTheInstalledBuild() {
+    @Test fun hidesCachedUpstreamReleases() {
         val release = release("v0.2.16")
         UpdateAvailability.save(context, release)
-
-        assertEquals(release, UpdateAvailability.available(context, "0.2.15"))
-    }
-
-    @Test fun removesAReleaseAfterTheAppCatchesUp() {
-        UpdateAvailability.save(context, release("v0.2.16"))
 
         assertNull(UpdateAvailability.available(context, "0.2.16"))
         assertNull(UpdateAvailability.available(context, "0.2.15"))
     }
 
-    @Test fun backgroundChecksDefaultOnAndPersistTheChoice() {
-        assertTrue(UpdateAvailability.backgroundChecksEnabled(context))
+    @Test fun backgroundChecksStayDisabledEvenWithAnExistingOptIn() {
+        assertFalse(UpdateAvailability.backgroundChecksEnabled(context))
+        UpdateAvailability.saveBackgroundChecksEnabled(context, true)
+        assertFalse(UpdateAvailability.backgroundChecksEnabled(context))
         UpdateAvailability.saveBackgroundChecksEnabled(context, false)
         assertFalse(UpdateAvailability.backgroundChecksEnabled(context))
     }
 
+    @Test fun releaseLookupDoesNotOpenANetworkConnection() {
+        assertNull(UpdateReleaseLookup.latest("0.2", "DiPlay/test") {
+            error("Upstream update checks must not access the network")
+        })
+    }
+
     @Test fun reportShowsStateWithRelativeAges() {
         assertEquals(
-            "Update check: background=on; lastSuccess=never; cachedRelease=none; lastResult=none (never); lastInstall=none (never)",
+            "Update check: background=off; lastSuccess=never; cachedRelease=none; lastResult=none (never); lastInstall=none (never)",
             UpdateAvailability.report(context, 10_000_000L),
         )
         UpdateAvailability.save(context, release("v0.2.16"))

@@ -4,6 +4,8 @@ import android.content.Context
 
 /** Durable metadata only. APK downloads always remain an explicit foreground action. */
 internal object UpdateAvailability {
+    // Upstream releases must stay disabled until this fork has its own update channel.
+    const val ENABLED = false
     private const val PREFERENCES = "diplay_update_availability"
     private const val TAG = "tag"
     private const val APK_NAME = "apk_name"
@@ -22,13 +24,14 @@ internal object UpdateAvailability {
         context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
 
     fun backgroundChecksEnabled(context: Context): Boolean =
-        preferences(context).getBoolean(BACKGROUND_CHECKS, true)
+        ENABLED && preferences(context).getBoolean(BACKGROUND_CHECKS, true)
 
     fun saveBackgroundChecksEnabled(context: Context, enabled: Boolean) {
         preferences(context).edit().putBoolean(BACKGROUND_CHECKS, enabled).apply()
     }
 
     fun available(context: Context, installedVersion: String): UpdateRelease? {
+        if (!ENABLED) return null
         val values = preferences(context)
         val release = UpdateRelease(
             tagName = values.getString(TAG, null) ?: return null,

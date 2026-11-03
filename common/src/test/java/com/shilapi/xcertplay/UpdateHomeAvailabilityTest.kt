@@ -8,16 +8,13 @@ import com.shilapi.xcertplay.host.R
 import com.shilapi.xcertplay.update.UpdateAvailability
 import com.shilapi.xcertplay.update.UpdateRelease
 import org.junit.After
-import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
-import org.robolectric.util.ReflectionHelpers
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [29], qualifiers = "en-w1920dp-h1080dp-land-mdpi")
@@ -26,41 +23,29 @@ class UpdateHomeAvailabilityTest {
 
     @After fun clear() = UpdateAvailability.clearAllForTest(application)
 
-    @Test fun cachedUpdateAppearsBelowTheVersionAndOpensTheExistingDownloadFlow() {
+    @Test fun cachedUpstreamUpdateDoesNotAppearOnHome() {
         val release = release()
         UpdateAvailability.save(application, release)
         val controller = Robolectric.buildActivity(DiPlayActivity::class.java).setup()
         val activity = controller.get()
         val text = activity.getString(R.string.update_available_home)
-        val update = descendants(activity.window.decorView).filterIsInstance<TextView>()
-            .single { it.text == text }
-
-        assertTrue(update.isClickable)
-        assertTrue(update.isFocusable)
-        assertTrue(update.minHeight >= (48 * activity.resources.displayMetrics.density).toInt())
-        assertEquals(DiPlayPalette.DARK.warning, update.currentTextColor)
-        update.performClick()
-
-        assertEquals(SettingsCategory.ABOUT, ReflectionHelpers.getField<SettingsCategory>(activity, "settingsCategory"))
-        assertTrue(descendants(activity.window.decorView).filterIsInstance<TextView>().any {
-            it.text == activity.getString(R.string.update_download)
-        })
+        assertFalse(descendants(activity.window.decorView).filterIsInstance<TextView>().any { it.text == text })
         controller.pause().stop().destroy()
     }
 
-    @Test fun anUpdateFoundWhileDiPlayWasInTheBackgroundShowsWhenHomeReturns() {
+    @Test fun cachedUpstreamUpdateStaysHiddenWhenHomeReturns() {
         val controller = Robolectric.buildActivity(DiPlayActivity::class.java).setup()
         val activity = controller.get()
         val text = activity.getString(R.string.update_available_home)
         fun shown() = descendants(activity.window.decorView).filterIsInstance<TextView>().any { it.text == text }
         assertFalse(shown())
 
-        // The check after opening finds a release while CarPlay is in front.
+        // A release cached before checks were disabled must stay hidden on resume.
         controller.pause().stop()
         UpdateAvailability.save(application, release())
         controller.start().resume()
 
-        assertTrue(shown())
+        assertFalse(shown())
         controller.pause().stop().destroy()
     }
 

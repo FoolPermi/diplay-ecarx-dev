@@ -9,6 +9,7 @@ internal object UpdateReleaseLookup {
         userAgent: String,
         openConnection: (URL) -> URLConnection = { it.openConnection() },
     ): UpdateRelease? {
+        if (!UpdateAvailability.ENABLED) return null
         val json = UpdateClient.fetchText(
             UpdateClient.RELEASES_URL,
             "application/vnd.github+json",
