@@ -101,26 +101,16 @@ internal class ManualHotspotInterfaces(
     }
 
     /**
-     * Interfaces that plausibly carry a hotspot the platform will not name: up, not wireless, not
-     * an upstream, not the default route, and holding an address a hotspot would publish. The
-     * reference vendor interface wins over an inferred one, so the pick stays deterministic on
-     * firmware where several VLANs share one address.
+     * Interfaces that plausibly carry a hotspot the platform will not name. See
+     * [inferHotspotCarrierCandidates] for the acceptance rules.
      */
     private fun hotspotCarrierCandidates(
         interfaces: List<HotspotInterfaceSnapshot>,
         upstreams: Set<String>,
         defaultInterface: String?,
-    ): Set<String> {
-        val eligible = interfaces.filter { iface ->
-            iface.up && iface.index > 0 && !iface.wireless &&
-                iface.name !in upstreams && iface.name != defaultInterface &&
-                iface.name !in EXCLUDED_INTERFACES && !mobileDataInterfaceName(iface.name) &&
-                iface.addresses.any(::publishesHotspotAddress)
-        }.map { it.name }
-        if (eligible.isEmpty()) return emptySet()
-        if (DEFAULT_CAR_HOTSPOT_INTERFACE in eligible) return setOf(DEFAULT_CAR_HOTSPOT_INTERFACE)
-        return eligible.toSet()
-    }
+    ): Set<String> = inferHotspotCarrierCandidates(
+        interfaces, upstreams, defaultInterface, EXCLUDED_INTERFACES, DEFAULT_CAR_HOTSPOT_INTERFACE,
+    )
 
     // 旧平台只使用允许读取的结果；接口归属读不到时保持 unknown，不放宽普通网卡资格。
     @SuppressLint("PrivateApi")
@@ -149,7 +139,7 @@ internal class ManualHotspotInterfaces(
         const val DEFAULT_CAR_HOTSPOT_INTERFACE = "eth0.3"
 
         // Virtual interfaces that carry vendor plumbing, not the hotspot an iPhone joins.
-        private val EXCLUDED_INTERFACES = setOf("dummy0", "sit0", "bond0", "ip6tnl0", "tunl0", "rmnet0")
+        internal val EXCLUDED_INTERFACES = setOf("dummy0", "sit0", "bond0", "ip6tnl0", "tunl0", "rmnet0")
     }
 
     @RequiresApi(36)
@@ -173,12 +163,56 @@ internal class ManualHotspotInterfaces(
     }
 }
 
-/** An address a hotspot publishes to its clients: a usable IPv4, or a scoped link-local IPv6. */
+/**
+ * An address a hotspot publishes to its clients: a usable IPv4, or a scoped link-local IPv6.
+ *
+ * This stays deliberately broad because the platform-owned and explicitly configured paths rely on
+ * it to accept an IPv6-only hotspot. Only the automatic inference in [inferHotspotCarrierCandidates]
+ * requires the stricter [publishesHotspotIpv4] evidence, so a bare `fe80::` on an internal wired
+ * interface cannot be mistaken for the hotspot carrier.
+ */
 internal fun publishesHotspotAddress(address: java.net.InetAddress): Boolean = when (address) {
-    is Inet4Address -> !address.isLoopbackAddress && !address.isAnyLocalAddress &&
-        !address.isLinkLocalAddress && !address.isMulticastAddress
+    is Inet4Address -> publishesHotspotIpv4(address)
     is Inet6Address -> address.isLinkLocalAddress
     else -> false
+}
+
+/**
+ * A usable IPv4 address a hotspot would publish to its clients. Link-local IPv6 is intentionally
+ * excluded: it is the evidence the automatic inference must not treat as hotspot ownership.
+ */
+internal fun publishesHotspotIpv4(address: java.net.InetAddress): Boolean =
+    address is Inet4Address && !address.isLoopbackAddress && !address.isAnyLocalAddress &&
+        !address.isLinkLocalAddress && !address.isMulticastAddress
+
+/**
+ * Interfaces that plausibly carry a hotspot the platform will not name: up, not wireless, not an
+ * upstream, not the default route, not a virtual/mobile-data interface, and holding a publishable
+ * IPv4 address. The reference vendor interface wins over an inferred one, so the pick stays
+ * deterministic on firmware where several VLANs share one address.
+ *
+ * Inference is intentionally stricter than the platform-owned and explicitly configured paths: it
+ * demands a publishable IPv4 address and rejects a bare link-local IPv6 (`fe80::`). Such an address
+ * is common on internal wired interfaces (`eth0`, `tam0`, …) and used to leak them into the
+ * candidate set. A genuine IPv6 hotspot is still reachable through the platform's tethered report or
+ * an explicitly configured interface, so IPv6 support is not disabled.
+ */
+internal fun inferHotspotCarrierCandidates(
+    interfaces: List<HotspotInterfaceSnapshot>,
+    upstreams: Set<String>,
+    defaultInterface: String?,
+    excludedInterfaces: Set<String>,
+    preferredInterface: String,
+): Set<String> {
+    val eligible = interfaces.filter { iface ->
+        iface.up && iface.index > 0 && !iface.wireless &&
+            iface.name !in upstreams && iface.name != defaultInterface &&
+            iface.name !in excludedInterfaces && !mobileDataInterfaceName(iface.name) &&
+            iface.addresses.any(::publishesHotspotIpv4)
+    }.map { it.name }
+    if (eligible.isEmpty()) return emptySet()
+    if (preferredInterface in eligible) return setOf(preferredInterface)
+    return eligible.toSet()
 }
 
 internal fun legacyHotspotInterfaces(tethered: List<String>, wifiRegexes: List<String>): Set<String>? {
