@@ -267,6 +267,11 @@ class CarPlayBonjour(
         }
     }
 
+    /** Local recovery must not reuse discovery after its owner closed or its worker exited. */
+    fun isRunning(): Boolean = synchronized(lifecycleLock) {
+        started && !closed && worker?.isAlive == true && (!useInterfaceMdns || interfaceMdns.isNotEmpty())
+    }
+
     /** Starts publication and discovery. Calling this more than once is harmless. */
     fun start() {
         synchronized(lifecycleLock) {

@@ -292,6 +292,7 @@ class CarPlayController(
         Thread(task, "diplay-first-tcp-timeout").apply { isDaemon = true }
     }.apply { removeOnCancelPolicy = true }
     @Volatile private var wirelessDiagnostics: WirelessStartupDiagnostics? = null
+    @Volatile private var bootstrapAttempt: WirelessBootstrapRecovery.Attempt? = null
     @Volatile private var bluetoothSocket: BluetoothSocket? = null
     @Volatile private var bluetoothStream: BluetoothRfcommDuplexStream? = null
     @Volatile private var wirelessTunnelChannel: Iap2Session? = null
@@ -1588,100 +1589,6 @@ class CarPlayController(
                 return
             }
 
-            onStatus(CarPlayStatus.ConnectingBluetooth)
-            debugLog(
-                "wireless RFCOMM connecting address=${device.address} " +
-                    "uuid=$IAP2_IPHONE_UUID",
-            )
-            // The picked phone can be paired and still refuse the link — switched off, left in the
-            // house, or its pairing is stale on the phone side. One retry on an iPhone the head unit
-            // is already talking to over Bluetooth is the difference between "it worked" and "go
-            // choose another iPhone in settings", so the target is a variable from here on.
-            var target = device
-            var socket = synchronized(wirelessResourceLock) {
-                if (isStaleWirelessRun(generation)) return
-                target.createRfcommSocketToServiceRecord(UUID.fromString(IAP2_IPHONE_UUID))
-                    .also { bluetoothSocket = it }
-            }
-            logBluetoothConnectionSnapshot(target, "before-connect")
-            var bluetoothStarted = System.nanoTime()
-            var bluetoothConnectMillis: Long
-            try {
-                connectBluetoothSocket(socket, target.address)
-                bluetoothConnectMillis = elapsedMillis(bluetoothStarted)
-                connectionDiagnostic("Bluetooth connect completed elapsedMs=$bluetoothConnectMillis " +
-                    "socketReportedConnected=${runCatching { socket.isConnected }.getOrNull() ?: "unknown"}")
-            } catch (error: Throwable) {
-                connectionDiagnostic(
-                    "Bluetooth connect failed elapsedMs=${elapsedMillis(bluetoothStarted)} " +
-                        "failureClass=${diagnosticFailureClass(error)}",
-                )
-                logBluetoothConnectionSnapshot(target, "after-failure")
-                val fallback = wirelessBluetoothFallback(adapter, target) ?: throw error
-                debugLog(
-                    "wireless RFCOMM fallback: ${target.address} unreachable, " +
-                        "trying the iPhone already connected over Bluetooth ${fallback.address}",
-                )
-                try {
-                    socket.close()
-                } catch (closeError: Throwable) {
-                    connectionDiagnostic(
-                        "Bluetooth fallback socket close failed: ${diagnosticFailureClass(closeError)}",
-                    )
-                }
-                target = fallback
-                socket = synchronized(wirelessResourceLock) {
-                    if (isStaleWirelessRun(generation)) return
-                    // Assigned rather than chained with `.also`: a second inline lambda in this
-                    // suspend function shifts `runWireless$N` and shows up as a class rename.
-                    val created = target.createRfcommSocketToServiceRecord(UUID.fromString(IAP2_IPHONE_UUID))
-                    bluetoothSocket = created
-                    created
-                }
-                logBluetoothConnectionSnapshot(target, "before-connect-fallback")
-                bluetoothStarted = System.nanoTime()
-                connectBluetoothSocket(socket, target.address)
-                bluetoothConnectMillis = elapsedMillis(bluetoothStarted)
-                connectionDiagnostic("Bluetooth connect completed on fallback elapsedMs=$bluetoothConnectMillis")
-            }
-            debugLog("wireless RFCOMM connected address=${target.address}")
-            logBluetoothConnectionSnapshot(target, "after-connect")
-            if (isStaleWirelessRun(generation)) {
-                return
-            }
-            val stream = synchronized(wirelessResourceLock) {
-                if (isStaleWirelessRun(generation)) return
-                try {
-                    BluetoothRfcommDuplexStream(socket, ::connectionDiagnostic).also { bluetoothStream = it }
-                } finally {
-                    // The stream owns the connected socket and also closes it if stream getters
-                    // fail. Do not retain a second socket owner in bootstrap teardown.
-                    if (bluetoothSocket === socket) bluetoothSocket = null
-                }
-            }
-            if (BluetoothLinkCheck.looksUnreal(bluetoothConnectMillis, 0L)) {
-                InstantBluetoothLink(generation, target, stream, bluetoothConnectMillis).also {
-                    instantBluetoothLink = it
-                    watchForUnrealBluetooth(it)
-                }
-            }
-            val channel = Iap2Session.openWireless(
-                stream,
-                traceContext = "wireless-rfcomm",
-                onTrace = ::debugLog,
-                onArtwork = ::onArtworkTransfer,
-            )
-            synchronized(wirelessResourceLock) {
-                if (isStaleWirelessRun(generation)) {
-                    channel.close()
-                    return
-                }
-                csm = channel
-            }
-            debugLog("wireless iAP2 CSM channel opened over RFCOMM")
-            if (isStaleWirelessRun(generation)) {
-                return
-            }
             val wirelessIdentification = Iap2WirelessIdentification(hostBluetoothMac, hotspotInfo.ssid)
             val bootstrapIdentification = config.identification.forWirelessLink(
                 Iap2WirelessLinkRole.BLUETOOTH_BOOTSTRAP,
@@ -1712,97 +1619,215 @@ class CarPlayController(
             )
             media.setIapTunnelHandler(::startWirelessTunnelControl)
 
-            onStatus(CarPlayStatus.RunningWireless)
-            debugLog(
-                "wireless Bluetooth iAP2 bootstrap starting " +
-                    "location=false vehicleStatus=false",
-            )
-            startedHotspot?.validateReady()
-            val result = Iap2WirelessControlClient(
-                session = channel,
-                mfi = Iap2MfiAuthenticationClient(mfi),
-            ).run(
-                identification = bootstrapIdentification,
-                endpoint = endpoint,
-                timeoutMillis = controlLoopTimeoutMillis(),
-                keepAliveAfterDeadline = { keepBluetoothControlAlive(generation) },
-                transportWaitMillis = WIRELESS_TRANSPORT_WAIT_MILLIS,
-                beforeStartSession = { startedHotspot?.validateReady() },
-                onStartSessionSent = { watchdog.startSessionSent(it.sentAtNanos) },
-                onIncoming = { onRouteFrame(it, "wireless-rfcomm") },
-                onProgress = { message ->
-                    diagnostics.controlProgress(message)
-                    debugLog(message)
-                },
-            )
-            if (isStaleWirelessRun(generation)) {
-                return
+            val startSessionSent = AtomicBoolean(false)
+            fun handoffStarted(): Boolean = startSessionSent.get() || wirelessActiveReported.get() ||
+                isWirelessHandoffInProgress(wirelessHandoffRequested.get(), wirelessTunnelChannel != null, activeSession != null)
+            fun validateInfrastructure() = synchronized(wirelessResourceLock) {
+                if (isStaleWirelessRun(generation)) throw java.util.concurrent.CancellationException("Stale wireless run")
+                if (hotspot !== startedHotspot || bonjour !== bonjourClient || vpnService !== service ||
+                    !service.isWirelessAttached(watchdog.listener) || !bonjourClient.isRunning()) {
+                    throw IOException("Wireless infrastructure changed during Bluetooth bootstrap")
+                }
+                requireNotNull(startedHotspot).validateReady()
             }
-            when (result.terminal) {
-                Iap2WirelessControlTerminal.CHANNEL_CLOSED -> {
+            WirelessBootstrapRecovery(
+                isCurrent = { !isStaleWirelessRun(generation) },
+                validateInfrastructure = ::validateInfrastructure,
+                handoffStarted = ::handoffStarted,
+                log = { connectionDiagnostic("wireless generation=$generation $it") },
+            ).run(
+                target = device,
+                validateTarget = { target -> validateBluetoothTarget(adapter, target) },
+                fallback = { target -> wirelessBluetoothFallback(adapter, target) },
+            ) { target, attempt ->
+                var completed = false
+                var bootstrapFailure: Throwable? = null
+                var stageStarted = System.nanoTime()
+                try {
+                    val socket = synchronized(wirelessResourceLock) {
+                        attempt.checkCurrent()
+                        if (handoffStarted()) throw java.util.concurrent.CancellationException("Wireless handoff started")
+                        validateInfrastructure()
+                        bootstrapAttempt = attempt
+                        // A failed socket is never reused, including after a protocol-layer failure.
+                        target.createRfcommSocketToServiceRecord(UUID.fromString(IAP2_IPHONE_UUID))
+                            .also { bluetoothSocket = it }
+                    }
+                    onBootstrapStatus(CarPlayStatus.ConnectingBluetooth, generation, attempt)
+                    logBluetoothConnectionSnapshot(target, "before-connect-${attempt.number}")
+                    val started = System.nanoTime()
+                    try {
+                        connectBluetoothSocket(socket, target.address) { attempt.isCurrent }
+                    } catch (error: Exception) {
+                        connectionDiagnostic("Bluetooth connect failed attempt=${attempt.number} " +
+                            "elapsedMs=${elapsedMillis(started)} failureClass=${diagnosticFailureClass(error)}")
+                        throw error
+                    }
+                    val connectMillis = elapsedMillis(started)
+                    connectionDiagnostic("Bluetooth connect completed attempt=${attempt.number} elapsedMs=$connectMillis")
+                    attempt.stage = WirelessBootstrapRecovery.Stage.CSM
+                    stageStarted = System.nanoTime()
+                    val stream = synchronized(wirelessResourceLock) {
+                        attempt.checkCurrent()
+                        try {
+                            BluetoothRfcommDuplexStream(socket, ::connectionDiagnostic).also { bluetoothStream = it }
+                        } finally {
+                            if (bluetoothSocket === socket) bluetoothSocket = null
+                        }
+                    }
+                    if (BluetoothLinkCheck.looksUnreal(connectMillis, 0L)) {
+                        InstantBluetoothLink(generation, target, stream, connectMillis, attempt).also {
+                            instantBluetoothLink = it
+                            watchForUnrealBluetooth(it)
+                        }
+                    }
+                    val channel = synchronized(wirelessResourceLock) {
+                        attempt.checkCurrent()
+                        Iap2Session.openWireless(
+                            stream,
+                            traceContext = "wireless-rfcomm-${attempt.number}",
+                            onTrace = { if (attempt.isCurrent) debugLog(it) },
+                            onArtwork = { if (attempt.isCurrent) onArtworkTransfer(it) },
+                        ).also { csm = it }
+                    }
+                    if (!channel.awaitReady(WirelessBootstrapRecovery.CSM_TIMEOUT_MILLIS)) {
+                        throw IOException("Timed out or closed waiting for wireless iAP2 CSM readiness")
+                    }
+                    attempt.checkCurrent()
+                    connectionDiagnostic("wireless attempt=${attempt.number} stage=CSM ready elapsedMs=${elapsedMillis(stageStarted)}")
+                    attempt.stage = WirelessBootstrapRecovery.Stage.BOOTSTRAP
+                    stageStarted = System.nanoTime()
+                    onBootstrapStatus(CarPlayStatus.RunningWireless, generation, attempt)
                     debugLog(
-                        "wireless RFCOMM EOF: iap2State=${result.stage} " +
-                            "wirelessCarPlayAvailable=${result.wirelessCarPlayAvailableSeen} " +
-                            "transportIdentifier=${result.transportNotificationSeen} " +
-                            "carPlayStartSessions=${result.carPlayStartSessionsSent} " +
-                            "postTransportConfigs=${result.postTransportWiFiConfigurationsSent} " +
-                            "handoffRequested=${wirelessHandoffRequested.get()} " +
-                            "tunnelReady=${wirelessTunnelReady.get()} " +
-                            "wirelessActive=${wirelessActiveReported.get()}",
+                        "wireless Bluetooth iAP2 bootstrap starting " +
+                            "location=false vehicleStatus=false",
                     )
-                    if (!wirelessActiveReported.get()) {
-                        val handoffInProgress = isWirelessHandoffInProgress(
-                            handoffRequested = wirelessHandoffRequested.get(),
-                            tunnelActive = wirelessTunnelChannel != null,
-                            sessionActive = activeSession != null,
-                        )
-                        if (!handoffInProgress) {
-                            // The link can die before the transport wait expires — the iPhone drops
-                            // it a few seconds after answering "unavailable". That answer still names
-                            // the reason better than a link error does.
-                            if (result.wirelessUnavailableReported) {
-                                throw ConnectionFailureException(
-                                    ConnectionFailureCause.WIRELESS_CARPLAY_UNAVAILABLE,
-                                    "The iPhone reported that this car cannot use wireless CarPlay, then " +
-                                        "closed the Bluetooth iAP2 link at state=${result.stage}",
+                    startedHotspot?.validateReady()
+                    val result = Iap2WirelessControlClient(
+                        session = channel,
+                        mfi = Iap2MfiAuthenticationClient(mfi),
+                    ).run(
+                        identification = bootstrapIdentification,
+                        endpoint = endpoint,
+                        timeoutMillis = controlLoopTimeoutMillis(),
+                        keepAliveAfterDeadline = { attempt.isCurrent && keepBluetoothControlAlive(generation) },
+                        handshakeTimeoutMillis = WirelessBootstrapRecovery.HANDSHAKE_TIMEOUT_MILLIS,
+                        onReady = {
+                            attempt.checkCurrent()
+                            connectionDiagnostic("wireless attempt=${attempt.number} stage=BOOTSTRAP authenticated " +
+                                "elapsedMs=${elapsedMillis(stageStarted)}")
+                        },
+                        transportWaitMillis = WIRELESS_TRANSPORT_WAIT_MILLIS,
+                        beforeStartSession = { attempt.checkCurrent(); validateInfrastructure() },
+                        onStartSessionSent = {
+                            if (attempt.isCurrent) {
+                                attempt.stage = WirelessBootstrapRecovery.Stage.CONTROL
+                                startSessionSent.set(true)
+                                watchdog.startSessionSent(it.sentAtNanos)
+                            }
+                        },
+                        onIncoming = { if (attempt.isCurrent) onRouteFrame(it, "wireless-rfcomm") },
+                        onProgress = { message ->
+                            attempt.checkCurrent()
+                            diagnostics.controlProgress(message)
+                            debugLog(message)
+                        },
+                    )
+                    if (isStaleWirelessRun(generation)) {
+                        return@run
+                    }
+                    when (result.terminal) {
+                        Iap2WirelessControlTerminal.CHANNEL_CLOSED -> {
+                            debugLog(
+                                "wireless RFCOMM EOF: iap2State=${result.stage} " +
+                                    "wirelessCarPlayAvailable=${result.wirelessCarPlayAvailableSeen} " +
+                                    "transportIdentifier=${result.transportNotificationSeen} " +
+                                    "carPlayStartSessions=${result.carPlayStartSessionsSent} " +
+                                    "postTransportConfigs=${result.postTransportWiFiConfigurationsSent} " +
+                                    "handoffRequested=${wirelessHandoffRequested.get()} " +
+                                    "tunnelReady=${wirelessTunnelReady.get()} " +
+                                    "wirelessActive=${wirelessActiveReported.get()}",
+                            )
+                            if (!wirelessActiveReported.get()) {
+                                val handoffInProgress = isWirelessHandoffInProgress(
+                                    handoffRequested = wirelessHandoffRequested.get(),
+                                    tunnelActive = wirelessTunnelChannel != null,
+                                    sessionActive = activeSession != null,
+                                )
+                                if (!handoffInProgress) {
+                                    // The link can die before the transport wait expires — the iPhone drops
+                                    // it a few seconds after answering "unavailable". That answer still names
+                                    // the reason better than a link error does.
+                                    if (result.wirelessUnavailableReported) {
+                                        throw ConnectionFailureException(
+                                            ConnectionFailureCause.WIRELESS_CARPLAY_UNAVAILABLE,
+                                            "The iPhone reported that this car cannot use wireless CarPlay, then " +
+                                                "closed the Bluetooth iAP2 link at state=${result.stage}",
+                                        )
+                                    }
+                                    throw IOException(
+                                        "Wireless CarPlay control channel closed before tunnel iAP2 ready",
+                                    )
+                                }
+                                debugLog(
+                                    "wireless Bluetooth bootstrap closed during handoff; " +
+                                        "keeping the Wi-Fi AirPlay tunnel alive",
                                 )
                             }
-                            throw IOException(
-                                "Wireless CarPlay control channel closed before tunnel iAP2 ready",
+                        }
+                        Iap2WirelessControlTerminal.TIMED_OUT ->
+                            if (!wirelessActiveReported.get()) {
+                                onStatus(CarPlayStatus.ControlEnded)
+                            }
+                        Iap2WirelessControlTerminal.NO_WIRELESS_TRANSPORT -> {
+                            // The iPhone authenticated over Bluetooth and then never asked for the Wi-Fi
+                            // transport. Naming the reason beats waiting out the five-minute control budget:
+                            // the screen just says it is connecting, and the driver has nothing to act on.
+                            debugLog(
+                                "wireless CarPlay never started: iap2State=${result.stage} " +
+                                    "wirelessCarPlayAvailable=${result.wirelessCarPlayAvailableSeen} " +
+                                    "reportedUnavailable=${result.wirelessUnavailableReported} " +
+                                    "wifiConfigs=${result.wifiConfigurationsSent} " +
+                                    "carPlayStartSessions=${result.carPlayStartSessionsSent}",
+                            )
+                            throw ConnectionFailureException(
+                                if (result.wirelessUnavailableReported) {
+                                    ConnectionFailureCause.WIRELESS_CARPLAY_UNAVAILABLE
+                                } else {
+                                    ConnectionFailureCause.WIRELESS_TRANSPORT_NOT_STARTED
+                                },
+                                "The iPhone authenticated but did not start the wireless CarPlay transport " +
+                                    "(wirelessCarPlayAvailable=${result.wirelessCarPlayAvailableSeen}, " +
+                                    "reportedUnavailable=${result.wirelessUnavailableReported}, " +
+                                    "iap2State=${result.stage})",
                             )
                         }
-                        debugLog(
-                            "wireless Bluetooth bootstrap closed during handoff; " +
-                                "keeping the Wi-Fi AirPlay tunnel alive",
-                        )
                     }
-                }
-                Iap2WirelessControlTerminal.TIMED_OUT ->
-                    if (!wirelessActiveReported.get()) {
-                        onStatus(CarPlayStatus.ControlEnded)
+                    completed = true
+                } catch (error: Throwable) {
+                    bootstrapFailure = error
+                    connectionDiagnostic("wireless attempt=${attempt.number} stage=${attempt.stage} failed " +
+                        "elapsedMs=${elapsedMillis(stageStarted)} failureClass=${diagnosticFailureClass(error)}")
+                    throw error
+                } finally {
+                    if (!handoffStarted()) {
+                        // A control probe can take a full connect timeout: never hold the resource
+                        // lock while probing, so close/restart can invalidate and cancel this attempt.
+                        val suspect = synchronized(wirelessResourceLock) {
+                            instantBluetoothLink?.takeIf {
+                                !completed && bootstrapFailure?.let(WirelessBootstrapRecovery::retryable) == true &&
+                                    it.attempt === attempt && attempt.isCurrent
+                            }
+                        }
+                        val unreal = suspect?.let { unrealBluetoothFailure(it, "bootstrap-failure") }
+                        synchronized(wirelessResourceLock) {
+                            if (bootstrapAttempt === attempt && !handoffStarted()) {
+                                val reportUnreal = attempt.isCurrent && unreal != null
+                                closeBluetoothBootstrapTransport()
+                                if (reportUnreal) throw requireNotNull(unreal)
+                            }
+                        }
                     }
-                Iap2WirelessControlTerminal.NO_WIRELESS_TRANSPORT -> {
-                    // The iPhone authenticated over Bluetooth and then never asked for the Wi-Fi
-                    // transport. Naming the reason beats waiting out the five-minute control budget:
-                    // the screen just says it is connecting, and the driver has nothing to act on.
-                    debugLog(
-                        "wireless CarPlay never started: iap2State=${result.stage} " +
-                            "wirelessCarPlayAvailable=${result.wirelessCarPlayAvailableSeen} " +
-                            "reportedUnavailable=${result.wirelessUnavailableReported} " +
-                            "wifiConfigs=${result.wifiConfigurationsSent} " +
-                            "carPlayStartSessions=${result.carPlayStartSessionsSent}",
-                    )
-                    throw ConnectionFailureException(
-                        if (result.wirelessUnavailableReported) {
-                            ConnectionFailureCause.WIRELESS_CARPLAY_UNAVAILABLE
-                        } else {
-                            ConnectionFailureCause.WIRELESS_TRANSPORT_NOT_STARTED
-                        },
-                        "The iPhone authenticated but did not start the wireless CarPlay transport " +
-                            "(wirelessCarPlayAvailable=${result.wirelessCarPlayAvailableSeen}, " +
-                            "reportedUnavailable=${result.wirelessUnavailableReported}, " +
-                            "iap2State=${result.stage})",
-                    )
                 }
             }
         } catch (error: Throwable) {
@@ -2071,6 +2096,9 @@ class CarPlayController(
 
 
     private fun closeBluetoothBootstrapTransport() {
+        bootstrapAttempt?.invalidate()
+        bootstrapAttempt = null
+        instantBluetoothLink = null
         val activeCsm = csm
         csm = null
         if (activeCsm != null) closeBestEffort("wireless CSM") { activeCsm.close() }
@@ -2790,6 +2818,20 @@ class CarPlayController(
         (wifiScanPause ?: WifiScanPause(appContext, ::debugLog).also { wifiScanPause = it }).pause()
     }
 
+    private fun validateBluetoothTarget(adapter: BluetoothAdapter, target: BluetoothDevice) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            appContext.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+            throw SecurityException("Bluetooth connect permission is not granted")
+        }
+        BluetoothRadioCheck.blockerForState(true, adapter.state, false)?.let {
+            throw BluetoothRadioCheck.failure(it)
+        }
+        if (adapter.bondedDevices.orEmpty().none { it.address.equals(target.address, ignoreCase = true) }) {
+            throw ConnectionFailureException(ConnectionFailureCause.NO_PAIRED_IPHONE,
+                "Selected Bluetooth target is no longer paired")
+        }
+    }
+
     private fun selectWirelessBluetoothDevice(adapter: BluetoothAdapter): BluetoothDevice {
         val bonded = adapter.bondedDevices.orEmpty()
         config.wirelessBluetoothDeviceAddress?.let { selected ->
@@ -2888,6 +2930,7 @@ class CarPlayController(
         val device: BluetoothDevice,
         val stream: BluetoothRfcommDuplexStream,
         val connectMillis: Long,
+        val attempt: WirelessBootstrapRecovery.Attempt,
     )
 
     /**
@@ -2904,11 +2947,14 @@ class CarPlayController(
             } catch (_: InterruptedException) {
                 return@Thread
             }
-            if (isStaleWirelessRun(link.generation)) return@Thread
+            if (isStaleWirelessRun(link.generation) || !link.attempt.isCurrent || instantBluetoothLink !== link) return@Thread
             val failure = unrealBluetoothFailure(link, "silence") ?: return@Thread
-            if (isStaleWirelessRun(link.generation)) return@Thread
-            fail(failure, link.generation)
-            closeWirelessStack(generation = link.generation)
+            if (isStaleWirelessRun(link.generation) || !link.attempt.isCurrent || instantBluetoothLink !== link) return@Thread
+            synchronized(wirelessResourceLock) {
+                if (!link.attempt.isCurrent || instantBluetoothLink !== link) return@Thread
+                fail(failure, link.generation)
+                closeWirelessStack(generation = link.generation)
+            }
         }, "diplay-bluetooth-link-check").apply { isDaemon = true; start() }
     }
 
@@ -2924,7 +2970,7 @@ class CarPlayController(
         val started = System.nanoTime()
         val control = runCatching {
             link.device.createRfcommSocketToServiceRecord(UUID.randomUUID())
-                .use { connectBluetoothSocket(it, link.device.address) }
+                .use { connectBluetoothSocket(it, link.device.address) { link.attempt.isCurrent } }
         }
         val controlMillis = elapsedMillis(started)
         val unreal = BluetoothLinkCheck.controlProvesUnreal(control.isSuccess, controlMillis)
@@ -2941,13 +2987,20 @@ class CarPlayController(
         )
     }
 
-    private fun connectBluetoothSocket(socket: BluetoothSocket, address: String) {
+    private fun connectBluetoothSocket(
+        socket: BluetoothSocket,
+        address: String,
+        isCurrent: () -> Boolean = { !closed },
+    ) {
+        val abandoned = AtomicBoolean(false)
         val result = AtomicReference<Throwable?>()
         val connected = CountDownLatch(1)
         Thread(
             {
                 try {
+                    if (abandoned.get() || !isCurrent()) throw java.util.concurrent.CancellationException("Stale RFCOMM connect")
                     socket.connect()
+                    if (abandoned.get() || !isCurrent()) runCatching { socket.close() }
                 } catch (error: Throwable) {
                     result.set(error)
                 } finally {
@@ -2960,13 +3013,25 @@ class CarPlayController(
             start()
         }
         val completed = try {
-            connected.await(RFCOMM_CONNECT_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
+            val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(RFCOMM_CONNECT_TIMEOUT_MILLIS)
+            var done = false
+            while (!done && System.nanoTime() < deadline && isCurrent()) {
+                done = connected.await(100, TimeUnit.MILLISECONDS)
+            }
+            if (!isCurrent()) {
+                abandoned.set(true)
+                runCatching { socket.close() }
+                throw java.util.concurrent.CancellationException("Stale RFCOMM connect")
+            }
+            done
         } catch (error: InterruptedException) {
             Thread.currentThread().interrupt()
+            abandoned.set(true)
             runCatching { socket.close() }
             throw IOException("Interrupted while connecting RFCOMM to $address", error)
         }
         if (!completed) {
+            abandoned.set(true)
             debugLog(
                 "wireless RFCOMM connect timed out after " +
                     "${RFCOMM_CONNECT_TIMEOUT_MILLIS}ms address=$address",
@@ -3397,13 +3462,19 @@ class CarPlayController(
         return builder.toString()
     }
 
-    private fun onStatus(status: CarPlayStatus, generation: Int? = null) {
+    private fun onStatus(status: CarPlayStatus, generation: Int? = null) =
+        postStatus(status, generation) { true }
+
+    private fun onBootstrapStatus(status: CarPlayStatus, generation: Int, attempt: WirelessBootstrapRecovery.Attempt) =
+        postStatus(status, generation) { attempt.isCurrent }
+
+    private fun postStatus(status: CarPlayStatus, generation: Int?, isCurrent: () -> Boolean) {
         if (closed) return
         mainHandler.post {
             // Keep a terminal phone-side outcome when cleanup reports a second error, including
             // for a later Activity adopting this controller. Manual Retry creates a new controller.
             if ((lastReportedStatus as? CarPlayStatus.Failed)?.usbPairingFailure != null) return@post
-            if (!closed && (generation == null || generation == wirelessGeneration.get()) && status != lastReportedStatus) {
+            if (!closed && isCurrent() && (generation == null || generation == wirelessGeneration.get()) && status != lastReportedStatus) {
                 lastReportedStatus = status
                 connectionDiagnostic("stage=${status.javaClass.simpleName}")
                 uiListener?.onDebugLog(status.debugLogMessage())
@@ -3494,7 +3565,8 @@ class CarPlayController(
         private const val PERMISSION_POLL_TIMEOUT_MILLIS = 120_000L
         private const val DEVICE_AVAILABILITY_POLL_INTERVAL_MILLIS = 2_000L
         private const val WIRELESS_HANDOFF_TIMEOUT_MILLIS = 45_000L
-        private const val RFCOMM_CONNECT_TIMEOUT_MILLIS = 15_000L
+        // Measured connects: 147–1714ms. Leave >4x headroom, without spending 15s on each dead socket.
+        private const val RFCOMM_CONNECT_TIMEOUT_MILLIS = 8_000L
         private const val MAXIMUM_REENUMERATION_ATTEMPTS = 2
         /** An iPhone answers the mode request within about a second; one took six (#335). */
         const val REENUMERATION_WAIT_MILLIS = 10_000L

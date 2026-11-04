@@ -178,6 +178,11 @@ class CarPlayVpnService : VpnService() {
 
     fun isAttached(): Boolean = active.get() && attachment != null
 
+    /** A retained listener may only be reused by the wireless run that attached it. */
+    @Synchronized
+    fun isWirelessAttached(owner: AirPlayListenerIdentity): Boolean =
+        active.get() && attachment?.listenerIdentity === owner && serverSocket?.isClosed == false
+
     /** Port the AirPlay listener actually bound, which may differ from the configured port. */
     fun boundPort(): Int? = attachment?.config?.port
 

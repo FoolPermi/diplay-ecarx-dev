@@ -13,6 +13,13 @@
 - 判定还会尊重「默认连接方式 = USB」，并且只保护真正配置过无线（已选手机）的用户，全新用户插 USB 仍能直接启动有线 CarPlay。
 - 本次未改动 AirPlay 协议、CH341/MFi 设备路径与系统 USB 权限弹窗；取消授权后的自动回退与迟到回调仍留待后续。
 
+## RFCOMM 与 iAP2 局部恢复（待实车验证）
+
+- 将 RFCOMM 建链、CSM 就绪、iAP2 identification/MFi 握手分别限时为 8 秒、5 秒、15 秒，不再让握手借用长期控制循环的预算。
+- 临时建链失败用新 socket 对同一目标重试一次（400ms 退避），仍失败才尝试唯一已连接的备用 iPhone；CSM／bootstrap 临时失败关闭旧 CSM 与 RFCOMM 后最多重建一次（800ms 退避）。三个恢复预算在本轮连接内共享，不按手机重置，最多创建 4 个 bootstrap socket。
+- 每次尝试复核原热点、AirPlay listener 和 Bonjour；蓝牙关闭、权限缺失、目标解绑、明确协议／认证拒绝与无效蓝牙实现不盲目重试。局部恢复不重启热点或 Bonjour，不重置 first-TCP 计时；StartSession 发送或 Wi-Fi handoff 开始后不再局部重建。
+- 为 bootstrap 增加独立 attempt token，屏蔽旧握手、状态、封面与假蓝牙探测回调；连接取消及时关闭 socket，迟到成功不得复活旧连接。预算与车测清单见 [RFCOMM 局部恢复](docs/RFCOMM_LOCAL_RECOVERY.zh-CN.md)。
+
 ## Release 自动构建
 
 - 发布 GitHub Release 后先运行仓库检查，再使用 Actions Secrets 中的现有平台密钥签名，上传 APK 与 SHA-256 校验文件；手动触发时提供 Actions 构建产物。

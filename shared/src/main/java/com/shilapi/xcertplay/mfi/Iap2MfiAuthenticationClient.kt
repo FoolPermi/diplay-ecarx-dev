@@ -38,9 +38,9 @@ class Iap2MfiAuthenticationClient(
         )
         while (true) {
             val remaining = remainingMillis(deadlineNanos)
-            if (remaining == 0L) throw Iap2MfiAuthenticationException("Timed out waiting for iAP2 MFi authentication")
+            if (remaining == 0L) throw Iap2MfiAuthenticationException("Timed out waiting for iAP2 MFi authentication", retryable = true)
             val frame = session.recv(remaining)
-                ?: throw Iap2MfiAuthenticationException("Timed out waiting for iAP2 MFi authentication")
+                ?: throw Iap2MfiAuthenticationException("Timed out waiting for iAP2 MFi authentication", retryable = true)
             when (frame.messageId) {
                 REQUEST_CERTIFICATE -> {
                     onProgress("iap2 mfi rx=0xaa00 request-certificate")
@@ -75,7 +75,7 @@ class Iap2MfiAuthenticationClient(
         deadlineNanos: Long,
     ) {
         val remaining = remainingMillis(deadlineNanos)
-        if (remaining == 0L) throw Iap2MfiAuthenticationException("Timed out sending iAP2 MFi authentication reply")
+        if (remaining == 0L) throw Iap2MfiAuthenticationException("Timed out sending iAP2 MFi authentication reply", retryable = true)
         session.send(frame, remaining)
     }
 
@@ -116,4 +116,9 @@ class Iap2MfiAuthenticationClient(
 }
 
 /** A malformed, rejected, unexpected, or timed-out iAP2 MFi authentication exchange. */
-class Iap2MfiAuthenticationException(message: String, cause: Throwable? = null) : MfiException(message, cause)
+class Iap2MfiAuthenticationException(
+    message: String,
+    cause: Throwable? = null,
+    /** Only a silent/closed transport is recoverable; a phone's rejection is not. */
+    val retryable: Boolean = false,
+) : MfiException(message, cause)
