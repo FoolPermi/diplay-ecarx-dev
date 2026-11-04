@@ -33,6 +33,14 @@ internal object ConnectionFailureGuidance {
                 return R.string.connection_help_wireless_carplay_unavailable
             ConnectionFailureCause.WIRELESS_TRANSPORT_NOT_STARTED ->
                 return R.string.connection_help_wireless_transport_not_started
+            ConnectionFailureCause.WIRELESS_BLUETOOTH_LINK_FAILED ->
+                return R.string.connection_help_wireless_bluetooth_link_failed
+            ConnectionFailureCause.WIRELESS_PHONE_NOT_RESPONDING ->
+                return R.string.connection_help_wireless_phone_not_responding
+            ConnectionFailureCause.WIRELESS_AUTHENTICATION_FAILED ->
+                return R.string.connection_help_wireless_authentication_failed
+            ConnectionFailureCause.WIRELESS_TUNNEL_NOT_STARTED ->
+                return R.string.connection_help_wireless_tunnel_not_started
             null -> Unit
         }
         when (failure.startupFailure) {
@@ -88,6 +96,10 @@ internal object ConnectionFailureGuidance {
         ConnectionFailureCause.CAR_HOTSPOT_START_FAILED -> R.string.hotspot_control_failed
         ConnectionFailureCause.WIRELESS_CARPLAY_UNAVAILABLE -> R.string.wireless_carplay_unavailable
         ConnectionFailureCause.WIRELESS_TRANSPORT_NOT_STARTED -> R.string.wireless_transport_not_started
+        ConnectionFailureCause.WIRELESS_BLUETOOTH_LINK_FAILED -> R.string.wireless_bluetooth_link_failed
+        ConnectionFailureCause.WIRELESS_PHONE_NOT_RESPONDING -> R.string.wireless_phone_not_responding
+        ConnectionFailureCause.WIRELESS_AUTHENTICATION_FAILED -> R.string.wireless_authentication_failed
+        ConnectionFailureCause.WIRELESS_TUNNEL_NOT_STARTED -> R.string.wireless_tunnel_not_started
     }
 
     /** The network the iPhone joins: the car hotspot, a Wi-Fi Direct group, or a shared Wi-Fi. */
