@@ -104,6 +104,7 @@ import com.shilapi.xcertplay.media.CarPlayTouchMapper
 import com.shilapi.xcertplay.media.CarPlayVideoLayout
 import com.shilapi.xcertplay.network.CarPlayVpnService
 import com.shilapi.xcertplay.orchestration.CarPlayController
+import com.shilapi.xcertplay.orchestration.CarPlayStartupTimeline
 import com.shilapi.xcertplay.orchestration.CarPlayRuntimeConfig
 import com.shilapi.xcertplay.network.WirelessStartupFailure
 import com.shilapi.xcertplay.network.WirelessStartupPolicy
@@ -932,6 +933,10 @@ open class CarPlayHostActivity : ComponentActivity() {
         if (CarPlayScreen.forwarded(this)) {
             forwarded = true
             return
+        }
+        if (AirPlayPersistence.loadWirelessEnabled(this)) {
+            CarPlayStartupTimeline.record(this, CarPlayStartupTimeline.Stage.HOST_CREATE,
+                AirPlayPersistence.loadWirelessHotspotMode(this))
         }
         val bluetoothState = IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -5321,7 +5326,11 @@ open class CarPlayHostActivity : ComponentActivity() {
                 runOnUiThread {
                     if (controllerGeneration != restartGeneration || activeAirPlaySession !== session || shuttingDown.get()) return@runOnUiThread
                     val firstFrame = startupRetryBudget.firstFrame(session, android.os.SystemClock.elapsedRealtime())
-                    if (firstFrame) appendLog("Main video first frame rendered; cluster output may start")
+                    if (firstFrame) {
+                        appendLog("Main video first frame rendered; cluster output may start")
+                        if (useWirelessTransport) CarPlayStartupTimeline.record(this@CarPlayHostActivity,
+                            CarPlayStartupTimeline.Stage.UI_FIRST_FRAME_CALLBACK, wirelessHotspotMode)
+                    }
                     if (!firstFrame) return@runOnUiThread
                     mainHandler.postDelayed({
                         if (controllerGeneration == restartGeneration && activeAirPlaySession === session &&
