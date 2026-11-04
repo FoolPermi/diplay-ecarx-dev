@@ -5455,7 +5455,7 @@ open class CarPlayHostActivity : ComponentActivity() {
         val englishDescription = status.describe(englishResources)
         val knownCause = (status as? CarPlayStatus.Failed)?.knownCause
         // Once the retries stopped, a later failure of the same attempt, such as its cleanup, keeps the line saying so.
-        if (!startupRetryStopped || status !is CarPlayStatus.Failed || status.usbPairingFailure != null) {
+        if (!startupRetryStopped || status !is CarPlayStatus.Failed || status.requiresManualRetry()) {
             if (knownCause != null) setConnectionStage(ConnectionFailureGuidance.stage(knownCause))
             else setConnectionStage(description, englishDescription)
             LastConnectionProblem.follow(this, status)
