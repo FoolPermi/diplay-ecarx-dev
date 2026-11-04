@@ -82,6 +82,12 @@ internal class ManualHotspotReadiness(
         var previous: HotspotSelection? = null
         var stable = 0
         var last: HotspotNetworkSnapshot? = null
+        // The tier is decided from the first sample only: an AP that is already on with a tethered
+        // interface and a usable address is confirmed quickly, while a hotspot that is still coming
+        // up keeps the full confirmation. Any interface or address change observed during the wait
+        // drops a fast start back to the full check.
+        var confirmedAtStart: Boolean? = null
+        var changed = false
         while (true) {
             if (cancelled()) throw InterruptedIOException("Hotspot readiness cancelled")
             if (nowMillis() >= deadline) throw WirelessStartupException(
@@ -91,15 +97,34 @@ internal class ManualHotspotReadiness(
             last = sample()
             val selected = selectHotspotInterface(last, log)
             if (cancelled()) throw InterruptedIOException("Hotspot readiness cancelled")
-            stable = if (selected != null && previous?.sameAddress(selected) == true) stable + 1 else 1
+            val previousSelection = previous
+            val same = selected != null && previousSelection?.sameAddress(selected) == true
+            // A vanished interface counts as a change too, so a fast start never confirms through it.
+            if (previousSelection != null && (selected == null || !same)) changed = true
+            if (confirmedAtStart == null) confirmedAtStart = selected != null && isConfirmed(last, selected)
+            stable = if (same) stable + 1 else 1
             previous = selected
-            if (selected != null && stable >= WirelessStartupPolicy.STABLE_SAMPLES && nowMillis() < deadline) {
+            val required = if (confirmedAtStart == true && !changed) {
+                WirelessStartupPolicy.CONFIRMED_STABLE_SAMPLES
+            } else {
+                WirelessStartupPolicy.STABLE_SAMPLES
+            }
+            if (selected != null && stable >= required && nowMillis() < deadline) {
                 log("hotspot interface confirmed iface=${selected.name} index=${selected.index} atMs=${nowMillis()}")
                 return selected
             }
             pause(minOf(WirelessStartupPolicy.INTERFACE_POLL_MILLIS, (deadline - nowMillis()).coerceAtLeast(1)))
         }
     }
+
+    /**
+     * True when this sample already proves the hotspot is established: the AP is reported on and
+     * [selection] is one of its tethered interfaces carrying a usable address (which
+     * [selectHotspotInterface] requires). The ifindex and IPv6 scopeId come from this fresh sample
+     * and are never cached across hotspot on/off cycles.
+     */
+    private fun isConfirmed(snapshot: HotspotNetworkSnapshot, selection: HotspotSelection): Boolean =
+        snapshot.apEnabled == true && snapshot.apInterfaces?.contains(selection.name) == true
 
     private fun lacksConfiguredInterface(snapshot: HotspotNetworkSnapshot): Boolean {
         val name = configuredInterface?.trim()?.takeIf { it.isNotEmpty() } ?: return false

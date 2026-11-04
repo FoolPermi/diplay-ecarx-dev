@@ -68,6 +68,35 @@ class ManualHotspotReadinessTest {
         assertEquals(500L, now)
     }
 
+    @Test fun alreadyTetheredHotspotConfirmsInFewerSamples() {
+        // AP on and wlan0 already tethered with a usable address: one poll interval instead of two.
+        val selected = await { snapshot(iface(), ap = setOf("wlan0")) }
+        assertEquals("wlan0", selected.name)
+        assertEquals(250L, now)
+    }
+
+    @Test fun hotspotStillComingUpKeepsFullStability() {
+        // The switch is on but the interface is not tethered at the first sample, so the full
+        // three-sample confirmation is kept even after the interface appears.
+        val selected = await {
+            if (now == 0L) snapshot(iface(), ap = emptySet()) else snapshot(iface(), ap = setOf("wlan0"))
+        }
+        assertEquals("wlan0", selected.name)
+        assertEquals(750L, now)
+    }
+
+    @Test fun interfaceChangeDuringConfirmedStartFallsBackToFullStability() {
+        // wlan0's ifindex can move between hotspot on/off cycles; a change during confirmation must
+        // restart the full check rather than confirm the first value.
+        val selected = await {
+            if (now == 0L) snapshot(iface(index = 13), ap = setOf("wlan0"))
+            else snapshot(iface(index = 14), ap = setOf("wlan0"))
+        }
+        assertEquals("wlan0", selected.name)
+        assertEquals(14, selected.index)
+        assertEquals(750L, now)
+    }
+
     @Test fun dualStackPrefersIpv4AndKeepsTheScopedLinkLocalFallback() {
         assertEquals(ipv4, select(snapshot(iface()))?.address)
         val onlyIpv6 = select(snapshot(iface(index = 9, addresses = listOf(ipv6))))!!
