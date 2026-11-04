@@ -31,7 +31,7 @@
 - 蓝牙 radio 为 ON，有对应版本所需权限，目标仍在配对列表中。
 - 没有发送 StartSession，没有开始 handoff、tunnel、AirPlay session 或无线 active。
 
-明确的权限、radio、目标解绑、无 socket manager、假蓝牙、identification 拒绝、MFi AuthenticationFailed／非法协议响应不属于临时失败。MFi 等待超时或通道提前关闭使用明确的 retryable 标志，与认证拒绝分开。嵌套 cause 中的权限、中断、取消和 fatal 错误也禁止重试。
+明确的权限、radio、目标解绑、无 socket manager、假蓝牙、identification 拒绝、MFi AuthenticationFailed／非法协议响应不属于临时失败。MFi 等待超时或通道提前关闭使用明确的 retryable 标志，与认证拒绝分开。嵌套 cause 中的权限、中断、取消和 fatal 错误也禁止重试。无线失败状态还显式携带 `automaticRetryAllowed`：权限／蓝牙关闭／目标丢失与明确协议拒绝要求用户操作，Host 不得将已经停止的局部恢复升级为新的整栈自动重试；手动「重试」仍可在用户修复条件后启动新会话。
 
 ## 取消、迟到回调与资源清理
 

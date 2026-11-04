@@ -5466,9 +5466,9 @@ open class CarPlayHostActivity : ComponentActivity() {
                 startupRetryButton?.visibility = View.VISIBLE
             } else if (status.wifiResetRequired) {
                 wifiRecoveryButton?.visibility = View.VISIBLE
-            } else if (status.knownCause == ConnectionFailureCause.WIRELESS_CARPLAY_UNAVAILABLE) {
-                // The iPhone answered for itself: repeating the same handshake cannot change its mind
-                // until the driver acts on the phone. Say so once and wait for a manual retry.
+            } else if (!status.automaticRetryAllowed || status.knownCause == ConnectionFailureCause.WIRELESS_CARPLAY_UNAVAILABLE) {
+                // Permission/radio/pairing prerequisites and explicit protocol rejection require
+                // driver action. Do not turn a stopped local recovery into a full-stack retry loop.
                 startupRetryStopped = true
                 reconnectScheduled = false
                 wifiRecoveryButton?.visibility = View.GONE

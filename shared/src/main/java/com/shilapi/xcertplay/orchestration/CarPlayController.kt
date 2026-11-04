@@ -150,7 +150,8 @@ sealed class CarPlayStatus {
     data class Failed(val message: String, val wifiResetRequired: Boolean = false,
         val startupFailure: WirelessStartupFailure? = null,
         val knownCause: ConnectionFailureCause? = null,
-        val usbPairingFailure: UsbPairingFailure? = null) : CarPlayStatus()
+        val usbPairingFailure: UsbPairingFailure? = null,
+        val automaticRetryAllowed: Boolean = true) : CarPlayStatus()
 }
 
 internal fun isWirelessHandoffInProgress(
@@ -2823,8 +2824,8 @@ class CarPlayController(
             appContext.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
             throw SecurityException("Bluetooth connect permission is not granted")
         }
-        BluetoothRadioCheck.blockerForState(true, adapter.state, false)?.let {
-            throw BluetoothRadioCheck.failure(it)
+        if (adapter.state != BluetoothAdapter.STATE_ON) {
+            throw BluetoothRadioCheck.failure(BluetoothRadioCheck.RADIO_OFF)
         }
         if (adapter.bondedDevices.orEmpty().none { it.address.equals(target.address, ignoreCase = true) }) {
             throw ConnectionFailureException(ConnectionFailureCause.NO_PAIRED_IPHONE,
@@ -3042,6 +3043,7 @@ class CarPlayController(
             )
         }
         val failure = result.get() ?: return
+        if (failure is Error) throw failure
         if (BluetoothLinkCheck.socketServiceMissing(failure)) {
             connectionDiagnostic("Bluetooth socket manager missing failureClass=${failure.javaClass.simpleName}")
         }
@@ -3399,7 +3401,8 @@ class CarPlayController(
                     LockdownPairingException.TimedOut -> UsbPairingFailure.TIMED_OUT
                     LockdownPairingException.Cancelled -> UsbPairingFailure.CANCELLED
                     else -> null
-                }),
+                },
+                automaticRetryAllowed = !wireless || !WirelessBootstrapRecovery.requiresUserAction(error)),
                 if (wireless) wirelessGeneration.get() else null)
         }
     }

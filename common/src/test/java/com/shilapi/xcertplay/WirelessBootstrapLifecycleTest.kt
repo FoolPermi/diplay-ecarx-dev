@@ -10,6 +10,7 @@ import android.content.ServiceConnection
 import android.os.Looper
 import com.shilapi.xcertplay.airplay.*
 import com.shilapi.xcertplay.iap2.session.Iap2Session
+import com.shilapi.xcertplay.mfi.Iap2MfiAuthenticationException
 import com.shilapi.xcertplay.network.*
 import com.shilapi.xcertplay.orchestration.*
 import com.shilapi.xcertplay.transport.BluetoothRadioCheck
@@ -262,6 +263,44 @@ class WirelessBootstrapLifecycleTest {
         `when`(phone.address).thenReturn("00:11:22:33:44:01")
         validateTarget(adapter, phone)
         verify(phone, never()).createRfcommSocketToServiceRecord(any())
+    }
+
+    @Test fun permissionFailureDisablesWholeStackAutomaticRetry() {
+        assertFalse(reportedFailure(IOException("Bluetooth bootstrap failed",
+            SecurityException("Bluetooth connect permission denied"))).automaticRetryAllowed)
+    }
+
+    @Test fun radioOffFailureDisablesWholeStackAutomaticRetry() {
+        assertFalse(reportedFailure(IOException("Bluetooth bootstrap failed",
+            BluetoothRadioCheck.failure(BluetoothRadioCheck.RADIO_OFF))).automaticRetryAllowed)
+    }
+
+    @Test fun missingSelectedBondDisablesWholeStackAutomaticRetry() {
+        val failure = reportedFailure(ConnectionFailureException(ConnectionFailureCause.NO_PAIRED_IPHONE,
+            "Selected Bluetooth target is no longer paired"))
+        assertFalse(failure.automaticRetryAllowed)
+        assertEquals(ConnectionFailureCause.NO_PAIRED_IPHONE, failure.knownCause)
+    }
+
+    @Test fun ordinaryTransportFailureStillAllowsWholeStackAutomaticRetry() {
+        assertTrue(reportedFailure(IOException("Bluetooth connection reset")).automaticRetryAllowed)
+    }
+
+    @Test fun retryableMfiTimeoutStillAllowsWholeStackAutomaticRetry() {
+        assertTrue(reportedFailure(Iap2MfiAuthenticationException(
+            "Timed out waiting for iAP2 MFi authentication", retryable = true)).automaticRetryAllowed)
+    }
+
+    @Test fun explicitMfiRejectionDisablesWholeStackAutomaticRetry() {
+        assertFalse(reportedFailure(IOException("Bluetooth bootstrap failed",
+            Iap2MfiAuthenticationException("iPhone sent AuthenticationFailed"))).automaticRetryAllowed)
+    }
+
+    private fun reportedFailure(error: Throwable): CarPlayStatus.Failed {
+        controller.javaClass.getDeclaredMethod("fail", Throwable::class.java, Int::class.javaObjectType)
+            .apply { isAccessible = true }.invoke(controller, error, 0)
+        shadowOf(Looper.getMainLooper()).idle()
+        return statuses.single() as CarPlayStatus.Failed
     }
 
     @Test fun retainedWirelessAttachmentRequiresExactOwnerAndAnOpenListenerSocket() {

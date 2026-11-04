@@ -96,7 +96,21 @@ internal class WirelessBootstrapRecovery(
         const val CONNECT_BACKOFF_MILLIS = 400L
         const val BOOTSTRAP_BACKOFF_MILLIS = 800L
 
+        /** Do not let the host turn a terminal prerequisite/rejection into a full-stack retry loop. */
+        internal fun requiresUserAction(error: Throwable): Boolean =
+            generateSequence(error) { it.cause }.take(8).any {
+                it is SecurityException || it is com.shilapi.xcertplay.mfi.MfiAuthenticationFailedException ||
+                    it.message?.contains(com.shilapi.xcertplay.transport.BluetoothRadioCheck.RADIO_OFF_MARK) == true ||
+                    it is Iap2IdentificationException ||
+                    it is Iap2MfiAuthenticationException && !it.retryable ||
+                    it is ConnectionFailureException && it.reason in setOf(
+                        ConnectionFailureCause.NO_PAIRED_IPHONE, ConnectionFailureCause.CHOSEN_IPHONE_NOT_PAIRED,
+                        ConnectionFailureCause.IPHONE_NOT_CHOSEN, ConnectionFailureCause.WIRELESS_CARPLAY_UNAVAILABLE,
+                    )
+            }
+
         internal fun retryable(error: Throwable): Boolean {
+            if (requiresUserAction(error)) return false
             val causes = generateSequence(error) { it.cause }.take(8).toList()
             if (causes.any { it is Error || it is SecurityException || it is IllegalArgumentException ||
                     it is IllegalStateException || it is InterruptedException || it is InterruptedIOException ||
