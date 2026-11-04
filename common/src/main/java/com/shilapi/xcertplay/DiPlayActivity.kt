@@ -32,6 +32,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
 import android.view.Gravity
@@ -536,17 +537,33 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             startCarHotspotOnLaunch()
             if (setupError == null && !CarPlayBackgroundSession.hasSession() &&
                 DiPlayPreferences.autoConnect(this) && requestedPage(intent) == null && page != "setup") {
-                // Launched at boot, the head unit's own hotspot is still coming up. Connecting at
-                // once lands in connect()'s "turn on the car hotspot" dialog, which the driver then
-                // has to dismiss seconds later, after the hotspot exists on its own. Wait for it.
-                handler.postDelayed({
-                    if (isFinishing || isDestroyed || CarPlayBackgroundSession.hasSession()) {
-                        return@postDelayed
+                // The same-LAN backend already waits for the interface/IP, so a blind 5s
+                // launch delay only hides useful work. A manually managed car hotspot can be
+                // started by the OEM after our Activity: wait for its ON state, but preserve
+                // the original bounded fallback for unknown/off framework states.
+                val wireless = DiPlayPreferences.autoConnectWireless(this)
+                val mode = AirPlayPersistence.loadWirelessHotspotMode(this)
+                val plan = LaunchAutoConnectPolicy.plan(wireless, mode, autoHotspotWanted())
+                val scheduledAt = SystemClock.elapsedRealtime()
+                fun dispatch() {
+                    if (isFinishing || isDestroyed || CarPlayBackgroundSession.hasSession()) return
+                    if (plan == LaunchAutoConnectPolicy.Plan.WAIT_FOR_CAR_HOTSPOT) {
+                        val hotspotOn = runCatching {
+                            com.shilapi.xcertplay.network.CarHotspotStatus.isEnabled(this)
+                        }.getOrNull()
+                        val delay = LaunchAutoConnectPolicy.carHotspotDelayMillis(
+                            hotspotOn, SystemClock.elapsedRealtime() - scheduledAt)
+                        if (delay > 0) {
+                            handler.postDelayed({ dispatch() }, delay)
+                            return
+                        }
                     }
-                    CarPlayStartupTimeline.record(this, CarPlayStartupTimeline.Stage.AUTO_CONNECT_DISPATCH,
-                        AirPlayPersistence.loadWirelessHotspotMode(this))
-                    connectWithSource(DiPlayPreferences.autoConnectWireless(this), ConnectionTraceSource.APP_LAUNCH)
-                }, if (autoHotspotWanted()) 0L else AUTO_CONNECT_AFTER_LAUNCH_MILLIS)
+                    CarPlayStartupTimeline.record(this, CarPlayStartupTimeline.Stage.AUTO_CONNECT_DISPATCH, mode)
+                    connectWithSource(wireless, ConnectionTraceSource.APP_LAUNCH)
+                }
+                handler.postDelayed({ dispatch() },
+                    if (plan == LaunchAutoConnectPolicy.Plan.LEGACY_DELAY)
+                        LaunchAutoConnectPolicy.LEGACY_DELAY_MILLIS else 0L)
             }
         }
     }
@@ -5691,14 +5708,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             intent.action == Intent.ACTION_MAIN && intent.hasCategory(Intent.CATEGORY_LAUNCHER) &&
                 !intent.hasExtra("page")
 
-        /**
-         * How long the launch-time auto-connect waits before it starts a session.
-         *
-         * The car's hotspot is enabled at boot by the head unit itself, a few seconds after DiPlay
-         * is launched. Connecting before it exists raises the "turn on the car hotspot" dialog for
-         * a condition that is about to fix itself, so this is deliberately longer than that window.
-         */
-        private const val AUTO_CONNECT_AFTER_LAUNCH_MILLIS = 5_000L
+        // Automatic launch timing lives in LaunchAutoConnectPolicy (no global fixed hotspot wait).
         private const val REPORT_VIEW_MAX_CHARS = 200_000
         private const val REPORT_HEAD_MAX_CHARS = 20_000
         private const val APPEARANCE_POLL_MILLIS = 2_000L
