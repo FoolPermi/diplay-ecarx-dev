@@ -119,14 +119,17 @@ internal class Iap2BootstrapWatchdog(
 /**
  * Per-checkpoint limits for the wireless iAP2 bootstrap, measured from the previous checkpoint.
  *
- * The budgets are deliberately generous: a healthy handshake reaches every checkpoint in well under
- * a second on the real car (RFCOMM connect ~1–2 s, CSM + identification + MFi under 0.5 s), so these
- * limits only fire on a genuinely stuck phone while still ending the attempt long before the
- * five-minute control-loop budget would.
+ * The budgets are deliberately generous: a healthy handshake usually reaches every checkpoint in
+ * well under a second, but CSM bring-up has been measured as late as 34.6 s on the real car, so the
+ * limits must cover the long tail and only fire on a genuinely stuck phone while still ending the
+ * attempt long before the five-minute control-loop budget would.
  */
 internal object Iap2BootstrapPolicy {
-    /** RFCOMM connect to a live iAP2 peer plus CSM negotiation. */
-    const val RFCOMM_TO_CSM_MILLIS = 15_000L
+    /**
+     * RFCOMM connect to a live iAP2 peer plus CSM negotiation. The 45 s budget covers the 34.6 s
+     * long-tail sample with margin, so a slow but healthy link is not mistaken for a dead one.
+     */
+    const val RFCOMM_TO_CSM_MILLIS = 45_000L
 
     /** Identification exchange plus MFi authentication. */
     const val CSM_TO_MFI_MILLIS = 30_000L

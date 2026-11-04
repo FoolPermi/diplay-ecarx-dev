@@ -2,7 +2,7 @@
 
 ## 范围与边界
 
-基于 `origin/dev` 的 `9f9f9001`。与 PR #34（Bonjour 异步 teardown）、#35（热点就绪分级确认）独立：不修改其整栈关闭流程与热点采样算法。热点、AirPlay listener、Bonjour、MFi client、endpoint、listener identity、无线 run generation 和 first-TCP watchdog 属于整个无线会话；局部恢复只替换 Bluetooth bootstrap 的 socket、stream、CSM 和 attempt token。
+基于最新 `origin/dev`（已含 #37/#38/#34/#35/#39/#40）。与 #38 的 iAP2 握手进度看门狗整合为一套超时来源：`Iap2BootstrapWatchdog` 按阶段触发超时，`WirelessBootstrapRecovery` 把 stall 统一转成一次带类型的局部重试；`WirelessBootstrapRecovery.CSM_TIMEOUT_MILLIS` / `HANDSHAKE_TIMEOUT_MILLIS` 只是略高于看门狗预算的硬兜底，用于看门狗无法关闭传输时唤醒阻塞等待。不修改 #34 的整栈关闭流程与 #35 的热点采样算法。热点、AirPlay listener、Bonjour、MFi client、endpoint、listener identity、无线 run generation 和 first-TCP watchdog 属于整个无线会话；局部恢复只替换 Bluetooth bootstrap 的 socket、stream、CSM 和 attempt token。
 
 重试策略由 `WirelessBootstrapRecovery` 管理，Android 资源仍由 `CarPlayController` 所有。所有重试运行在既有 worker，关闭旧 CSM 和 RFCOMM 后才创建新 socket，不复用失败 socket，不扫描并猜测其他已配对手机。
 
@@ -11,14 +11,14 @@
 | 阶段 | 超时 | 可恢复失败的处理 |
 | --- | --- | --- |
 | RFCOMM socket 创建／connect | connect 8s | 同目标新 socket 一次，退避 400ms；该预算耗尽后，可切换一次唯一已连接的备用 iPhone |
-| CSM link 就绪 | 5s | 与 bootstrap 共用一次重建预算，退避 800ms |
-| identification、MFi、订阅 | 三者合计 15s，且受原控制总预算上限约束 | 临时 EOF、握手超时等最多重建一次 RFCOMM + CSM，重新完整认证 |
+| CSM link 就绪 | 看门狗预算 45s（覆盖实测 34.6s 长尾），硬等待 50s 兜底 | 与 bootstrap 共用一次重建预算，退避 800ms |
+| identification、MFi、订阅 | 看门狗 CSM→MFi 30s 主导，硬握手 35s 兜底，且受原控制总预算上限约束 | 临时 EOF、握手超时（含被 I/O/传输层包装的 MFi 超时）最多重建一次 RFCOMM + CSM，重新完整认证 |
 | 认证后的无线配置交换 | 保留原 transport-wait 60s | StartSession 前临时断链可消耗尚未使用的 bootstrap 重建预算；明确 unavailable 或 transport-wait 到期不局部重试 |
 | StartSession 后／Wi-Fi handoff | 保留 first-TCP 30s、handoff 45s 及原长期控制策略 | 不再局部重建；继续由原有 watchdog 和 handoff 规则处理，不能把 session 存在当成成功渲染证据 |
 
-建链、bootstrap、备用目标各有一个恢复预算，整个 wireless run 共享，不随目标切换或成功建链重置。因此最多 4 个 bootstrap socket，不是对每个手机简单循环 5 次。假蓝牙诊断所用随机 UUID 控制探测不属于 bootstrap socket，也不可用于实际协议通信。
+建链、bootstrap、备用目标各有一个恢复预算，整个 wireless run 共享，不随目标切换或成功建链重置。因此最多 4 个 bootstrap socket，不是对每个手机简单循环 5 次。假蓝牙诊断所用随机 UUID 控制探测不属于 bootstrap socket，也不可用于实际协议通信。CSM 的 45s 是看门狗唯一阶段超时；原来的 5s 会把历史 34.6s 才就绪的健康长尾连接误判为蓝牙故障，应避免再引入更短的独立 CSM 等待。
 
-实测 RFCOMM connect 为 147–1714ms；8s 是保留超过最大样本 4 倍余量的保守起点，避免原来每个死 socket 都等待 15s。400ms 用于让失败 RFCOMM 资源退出，协议重建使用更长的 800ms 让手机释放旧 CSM。上述数值是工程预算，不代表已证实的实车成功率或延迟改善，仍需真实 ECARX 753 / Android 9 的对照测试。
+实测 RFCOMM connect 为 147–1714ms；8s 是保留超过最大样本 4 倍余量的保守起点，避免原来每个死 socket 都等待 15s。CSM 历史存在 34.626s 才就绪的样本，45s 是在此之上留出余量的长尾预算。400ms 用于让失败 RFCOMM 资源退出，协议重建使用更长的 800ms 让手机释放旧 CSM。上述数值是工程预算，不代表已证实的实车成功率或延迟改善，仍需真实 ECARX 753 / Android 9 的对照测试。
 
 ## 允许恢复的条件
 

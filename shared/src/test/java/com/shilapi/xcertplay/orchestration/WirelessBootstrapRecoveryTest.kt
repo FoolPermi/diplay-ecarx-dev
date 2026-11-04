@@ -168,6 +168,31 @@ class WirelessBootstrapRecoveryTest {
         assertTrue(fixture.fallbackTargets.isEmpty())
     }
 
+    @Test fun wrappedMfiTimeoutStillRetriesBootstrapOnce() {
+        val fixture = Fixture()
+        val wrapped = IOException(
+            "bootstrap stream closed",
+            Iap2MfiAuthenticationException("timed out waiting for authentication", retryable = true),
+        )
+        assertTrue(WirelessBootstrapRecovery.retryable(wrapped))
+
+        fixture.run { _, attempt ->
+            attempt.stage = Stage.BOOTSTRAP
+            if (attempt.number == 1) throw wrapped
+            assertStale(fixture.attempts.first())
+        }
+
+        assertEquals(2, fixture.attempts.size)
+        assertEquals(WirelessBootstrapRecovery.BOOTSTRAP_BACKOFF_MILLIS, fixture.pauses.sum())
+    }
+
+    @Test fun wrappedMfiRejectionNeverRetries() {
+        assertNoRecovery(
+            IOException("bootstrap stream closed", Iap2MfiAuthenticationException("iPhone sent AuthenticationFailed")),
+            Stage.BOOTSTRAP,
+        )
+    }
+
     @Test fun retryableMfiFlagCannotOverridePermissionFailureInCauseChain() {
         assertNoRecovery(
             Iap2MfiAuthenticationException("authentication unavailable", SecurityException("denied"), retryable = true),
@@ -496,6 +521,18 @@ class WirelessBootstrapRecoveryTest {
         assertTrue(attempt.timeout(stall()))
         val fatal = AssertionError("fatal transport failure")
         assertSame(fatal, attempt.failure(fatal))
+    }
+
+    @Test fun failureWrapsAWrappedMfiTimeoutWithTypedReason() {
+        val attempt = Attempt({ true }, 1).apply { this.stage = Stage.BOOTSTRAP }
+        val wrapped = IOException(
+            "stream closed",
+            Iap2MfiAuthenticationException("MFi timeout", retryable = true),
+        )
+        val failure = attempt.failure(wrapped) as WirelessBootstrapRecovery.BootstrapFailure
+        assertEquals(ConnectionFailureCause.WIRELESS_PHONE_NOT_RESPONDING, failure.reason)
+        assertSame(wrapped, failure.cause)
+        assertTrue(WirelessBootstrapRecovery.retryable(failure))
     }
 
     @Test fun protocolTimeoutsKeepTypedUpstreamCausesWithoutRetryingExplicitRejection() {

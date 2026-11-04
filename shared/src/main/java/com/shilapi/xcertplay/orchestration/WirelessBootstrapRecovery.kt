@@ -121,8 +121,22 @@ internal class WirelessBootstrapRecovery(
     }
 
     companion object {
-        const val CSM_TIMEOUT_MILLIS = 5_000L
-        const val HANDSHAKE_TIMEOUT_MILLIS = 15_000L
+        /**
+         * Kept above the watchdog's phase budget so the watchdog owns the timeout and turns a stall
+         * into one typed local recovery. This value only unwedges a blocking wait if the watchdog
+         * cannot close the transport first.
+         */
+        const val PHASE_SAFETY_MARGIN_MILLIS = 5_000L
+
+        /** CSM wait safety net; the phase budget is [Iap2BootstrapPolicy.RFCOMM_TO_CSM_MILLIS]. */
+        const val CSM_TIMEOUT_MILLIS = Iap2BootstrapPolicy.RFCOMM_TO_CSM_MILLIS + PHASE_SAFETY_MARGIN_MILLIS
+
+        /**
+         * Handshake safety net above [Iap2BootstrapPolicy.CSM_TO_MFI_MILLIS]. The watchdog fires
+         * first and the stall still maps to one local bootstrap recovery.
+         */
+        const val HANDSHAKE_TIMEOUT_MILLIS = Iap2BootstrapPolicy.CSM_TO_MFI_MILLIS + PHASE_SAFETY_MARGIN_MILLIS
+
         const val CONNECT_BACKOFF_MILLIS = 400L
         const val BOOTSTRAP_BACKOFF_MILLIS = 800L
 
@@ -146,9 +160,12 @@ internal class WirelessBootstrapRecovery(
                     it is IllegalStateException || it is InterruptedException || it is InterruptedIOException ||
                     it is CancellationException || it is WirelessStartupException ||
                     it is ConnectionFailureException && it !is BootstrapFailure || it is Iap2IdentificationException }) return false
-            if (causes.any { it is MfiException && (it !is Iap2MfiAuthenticationException || !it.retryable) }) return false
-            // A silent/closed MFi transport is recoverable even though MfiException is not an IOException.
-            if (error is Iap2MfiAuthenticationException) return error.retryable
+            // MFi timeouts can be wrapped by an IO/transport layer. Recognise a retryable
+            // Iap2MfiAuthenticationException anywhere in the cause chain so a silent phone still
+            // consumes one local bootstrap recovery instead of looking like a terminal rejection.
+            val mfiTimeouts = causes.filterIsInstance<Iap2MfiAuthenticationException>()
+            if (mfiTimeouts.isNotEmpty()) return mfiTimeouts.all { it.retryable }
+            if (causes.any { it is MfiException }) return false
             return error is IOException
         }
     }
