@@ -55,6 +55,7 @@ object AirPlayPersistence {
     private const val KEY_NAVIGATION_AUDIO_ATTENUATION = "navigation_audio_attenuation_db"
     private const val KEY_NAVIGATION_STREAM_TYPE = "navigation_stream_type"
     private const val KEY_WIRELESS_ENABLED = "wireless_enabled"
+    private const val KEY_USB_AUTO_TAKEOVER = "usb_auto_takeover"
     private const val KEY_WIRELESS_HOTSPOT_MODE = "wireless_hotspot_mode"
     private const val KEY_WIFI_P2P_PREFERRED_CHANNEL = "wifi_p2p_preferred_channel"
     /** Read by CarPlayController in the shared module under the same name. */
@@ -562,6 +563,21 @@ object AirPlayPersistence {
     fun saveAutoStartOnBoot(context: Context, enabled: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putBoolean(KEY_AUTO_START_ON_BOOT, enabled)
+            .apply()
+    }
+
+    /**
+     * Whether plugging the iPhone into the car's USB data port may take the running session away from
+     * wireless CarPlay. Defaults to false: a USB attach must not break an established wireless session
+     * or ask for VPN consent unless the driver opted in or explicitly chose wired CarPlay.
+     */
+    fun loadUsbAutoTakeover(context: Context): Boolean =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_USB_AUTO_TAKEOVER, false)
+
+    fun saveUsbAutoTakeover(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putBoolean(KEY_USB_AUTO_TAKEOVER, enabled)
             .apply()
     }
 

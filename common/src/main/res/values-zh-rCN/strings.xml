@@ -118,6 +118,8 @@
     <string name="auto">自动</string>
     <string name="auto_start_on_boot">开机后自动启动</string>
     <string name="automatic_connection">自动连接</string>
+    <string name="settings_usb_auto_takeover">允许 USB 插入自动接管无线 CarPlay</string>
+    <string name="settings_usb_auto_takeover_description">关闭时，插入 USB 只会记录设备状态，不会打断已连接的无线 CarPlay，也不会请求 VPN 授权；仍可通过“通过 USB 连接”主动使用有线。下次插入 iPhone 时生效。</string>
     <string name="usb_auto_confirm_title">自动确认 USB 权限</string>
     <string name="usb_auto_confirm_subtitle">有线连接 iPhone 时自动确认系统 USB 权限弹窗（需要无障碍服务）</string>
     <string name="usb_auto_confirm_desc">在出现 CarPlay USB 权限弹窗时自动勾选默认并点击确定</string>

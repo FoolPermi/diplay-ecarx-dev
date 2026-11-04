@@ -125,6 +125,8 @@
     <string name="auto">Auto</string>
     <string name="auto_start_on_boot">Auto-start on boot</string>
     <string name="automatic_connection">Automatic connection</string>
+    <string name="settings_usb_auto_takeover">Allow USB to take over wireless CarPlay</string>
+    <string name="settings_usb_auto_takeover_description">Off: plugging the iPhone into the car\'s USB data port only records the device. DiPlay keeps the wireless connection and does not ask for VPN approval. Wired CarPlay still starts from Connect with USB. Applies the next time the iPhone is plugged in.</string>
     <string name="usb_auto_confirm_title">Auto-confirm USB permission</string>
     <string name="usb_auto_confirm_subtitle">Automatically accept the Android USB permission prompt when an iPhone is connected via cable (requires Accessibility Service)</string>
     <string name="usb_auto_confirm_desc">Automatically checks Always allow and confirms the Android USB accessory prompt for CarPlay</string>
