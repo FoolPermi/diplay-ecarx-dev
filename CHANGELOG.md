@@ -15,6 +15,12 @@
 
 - 暂停上游 DiPlay 版本检查：隐藏手动检查与后台开关、停止显示缓存的更新提示，并取消已排队的后台检查，避免本分支提示安装上游 APK。
 
+## 移除 Compose 依赖
+
+- 全项目唯一使用 Compose 的是板级 I2C 诊断页 `MainActivity`（`exported=false`，无任何入口可到达）。该页改为与其他页面一致的手写 View 实现，配色复用 `DiPlayPalette`，昼夜跟随 `AppAppearanceRuntime`。
+- `common`、`mobile`、`automotive` 移除 Compose 编译插件、`buildFeatures.compose` 与 Runtime/UI/Material3 依赖，`ui/theme/` 模板包删除。
+- Release 构建未启用 R8 裁剪，Compose 此前约占 APK 内 dex 类数与代码量的三成；移除后 APK 显著减小、编译期少一个编译器插件，车机安装与 dexopt 时间同步下降。
+
 ## 导航诊断：MQTT 观测（#24）
 
 - 诊断报告新增导航 MQTT 观测：用独立只读会话订阅 12 个 `dim/*` 与 `ihu/*` 导航主题，按主题记录条数、距上次的毫秒数、是否 retained 与最后一条摘要。它只订阅、不发任何导航命令，用来区分「原厂服务还在写」和「本端没发出去」。

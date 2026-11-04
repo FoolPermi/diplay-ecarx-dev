@@ -39,3 +39,6 @@ release-signing.properties
 *.key
 *.apk
 *.aab
+
+# Accidental literal ${user.home} tooling caches (Robolectric/Maven test downloads)
+${user.home}/

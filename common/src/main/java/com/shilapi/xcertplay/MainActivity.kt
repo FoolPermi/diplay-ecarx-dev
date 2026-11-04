@@ -1,83 +1,60 @@
 package com.shilapi.xcertplay
 
+import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
+import android.util.TypedValue
+import android.view.ViewGroup
+import android.widget.Button
+import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.TextView
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import com.shilapi.xcertplay.mfi.MfiProtocolMajorResult
 import com.shilapi.xcertplay.mfi.MfiSelfCheck
 import com.shilapi.xcertplay.mfi.MfiSelfCheckResult
 import com.shilapi.xcertplay.transport.LinuxI2cTransport
-import com.shilapi.xcertplay.ui.theme.XcertplayTheme
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
+/** Board I2C diagnostic page, plain views like every other screen. */
 class MainActivity : ComponentActivity() {
     private val executor: ExecutorService = Executors.newSingleThreadExecutor()
-    private var status by mutableStateOf<DiagnosticStatus>(DiagnosticStatus.Idle)
-    private var appNight by mutableStateOf(true)
+    private var status: DiagnosticStatus = DiagnosticStatus.Idle
+    private var appNight = true
     private var stopObservingAppearance: (() -> Unit)? = null
+    private lateinit var root: LinearLayout
+    private lateinit var titleText: TextView
+    private lateinit var devicePathInput: EditText
+    private lateinit var runButton: Button
+    private lateinit var statusText: TextView
+    private lateinit var noteText: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         appNight = resolveAppNightNow()
         enableEdgeToEdge()
-        setContent {
-            XcertplayTheme(darkTheme = appNight) {
-                var devicePath by remember { mutableStateOf("/dev/i2c-1") }
-                Scaffold(modifier = Modifier.fillMaxSize()) { padding ->
-                    Column(
-                        modifier = Modifier.padding(padding).padding(24.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        Text("Board I2C diagnostic")
-                        OutlinedTextField(
-                            value = devicePath,
-                            onValueChange = { devicePath = it },
-                            modifier = Modifier.fillMaxWidth(),
-                            label = { Text("Linux I2C device") },
-                            singleLine = true,
-                            enabled = status !is DiagnosticStatus.Running,
-                        )
-                        Button(
-                            onClick = { runSelfCheck(devicePath) },
-                            enabled = status !is DiagnosticStatus.Running,
-                        ) {
-                            Text("Run MFi self-check")
-                        }
-                        Spacer(Modifier.height(4.dp))
-                        Text(status.message())
-                        Text("CH341 requires deployment-specific VID/PID configuration.")
-                    }
-                }
-            }
-        }
+        setContentView(buildContent())
     }
 
     override fun onResume() {
         super.onResume()
-        appNight = resolveAppNightNow()
+        if (resolveAppNightNow() != appNight) {
+            appNight = resolveAppNightNow()
+            applyPalette()
+        }
         stopObservingAppearance?.invoke()
         stopObservingAppearance = AppAppearanceRuntime.observeHost {
             runOnUiThread {
-                if (!isFinishing && !isDestroyed) appNight = resolveAppNightNow()
+                if (!isFinishing && !isDestroyed) {
+                    val next = resolveAppNightNow()
+                    if (next != appNight) {
+                        appNight = next
+                        applyPalette()
+                    }
+                }
             }
         }
     }
@@ -93,8 +70,68 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 
+    private fun buildContent(): LinearLayout {
+        val padding = dp(24)
+        val gap = dp(GAP_DP)
+        root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(padding, padding, padding, padding)
+        }
+        titleText = TextView(this).apply { setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f) }
+        root.addView(titleText, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        devicePathInput = EditText(this).apply {
+            setSingleLine()
+            hint = "Linux I2C device"
+            setText("/dev/i2c-1")
+        }
+        root.addView(devicePathInput, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = gap })
+        runButton = Button(this).apply {
+            text = "Run MFi self-check"
+            setOnClickListener { runSelfCheck(devicePathInput.text.toString().trim()) }
+        }
+        root.addView(runButton, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = gap })
+        statusText = TextView(this).apply { setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f) }
+        root.addView(statusText, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = gap })
+        noteText = TextView(this).apply { setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f) }
+        root.addView(noteText, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = gap })
+        titleText.text = "Board I2C diagnostic"
+        noteText.text = "CH341 requires deployment-specific VID/PID configuration."
+        renderStatus(status)
+        applyPalette()
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            view.setPadding(
+                view.paddingLeft, view.paddingTop + bars.top,
+                view.paddingRight, view.paddingBottom + bars.bottom,
+            )
+            WindowInsetsCompat.CONSUMED
+        }
+        return root
+    }
+
+    private fun applyPalette() {
+        val palette = DiPlayPalette.of(appNight)
+        window.setBackgroundDrawable(ColorDrawable(palette.background))
+        window.statusBarColor = palette.systemBar
+        window.navigationBarColor = palette.systemBar
+        root.setBackgroundColor(palette.background)
+        titleText.setTextColor(palette.primaryText)
+        devicePathInput.setTextColor(palette.primaryText)
+        devicePathInput.setHintTextColor(palette.secondaryText)
+        statusText.setTextColor(palette.secondaryText)
+        noteText.setTextColor(palette.secondaryText)
+        runButton.setTextColor(palette.onAccent)
+        runButton.background.mutate().setTint(palette.button)
+    }
+
     private fun runSelfCheck(devicePath: String) {
-        status = DiagnosticStatus.Running
+        if (devicePath.isEmpty()) return
+        renderStatus(DiagnosticStatus.Running)
         executor.execute {
             val next = try {
                 LinuxI2cTransport.open(devicePath).use { MfiSelfCheck(it).run() }
@@ -105,9 +142,21 @@ class MainActivity : ComponentActivity() {
                 DiagnosticStatus.Failure(error.message ?: error.javaClass.simpleName)
             }
             runOnUiThread {
-                if (!isFinishing && !isDestroyed) status = next
+                if (!isFinishing && !isDestroyed) renderStatus(next)
             }
         }
+    }
+
+    private fun renderStatus(next: DiagnosticStatus) {
+        status = next
+        statusText.text = next.message()
+        runButton.isEnabled = next !is DiagnosticStatus.Running
+    }
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+    private companion object {
+        const val GAP_DP = 12
     }
 }
 
