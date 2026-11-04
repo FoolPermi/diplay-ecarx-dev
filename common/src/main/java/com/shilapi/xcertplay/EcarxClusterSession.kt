@@ -78,6 +78,8 @@ internal class EcarxClusterSession(
             hide()
             return
         }
+        // Creating a hidden route's window can make OEM firmware display the map anyway.
+        if (!wanted && presentation == null) return
         // DIM controls map visibility. The route owns the independent window and its video source.
         if (!wanted) projectionRequested = false
         surface?.takeIf { it.isValid }?.let {

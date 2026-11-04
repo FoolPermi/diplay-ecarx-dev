@@ -170,19 +170,42 @@ class EcarxClusterFirstFrameTest {
         verify(panels.constructed().single()).dismiss()
     }
 
-    @Test fun aRouteStartingHiddenPreparesItsMapWithoutSelectingItOnTheCluster() {
+    @Test fun aRouteStartingHiddenWaitsForAVisibilityRequestBeforePreparingItsMap() {
         `when`(session.hasRenderedMainFrame).thenReturn(true)
-        output.onRouteRequested(HIDDEN)
+        repeat(2) {
+            output.onRouteRequested(HIDDEN)
+            output.onSessionChanged()
+            idle()
+        }
+        assertTrue(panels.constructed().isEmpty())
+        verifyNoInteractions(sink)
+        verify(controller, never()).setClusterOutputVisible(true)
+        assertFalse(events.any { "presentation request show=true" in it })
+
+        output.onRouteRequested(SHOWN)
         idle()
+        verify(panels.constructed().single()).show()
         surfaceCallbacks.single()(surface)
         verify(sink).setSurface(111, surface)
-        frameCallbacks.single()(surface)
-        idle()
+        verify(controller, atLeastOnce()).setClusterOutputVisible(true)
         assertFalse(events.any { "presentation request show=true" in it })
-        output.onRouteRequested(SHOWN)
+        frameCallbacks.single()(surface)
         idle()
         assertEquals(1, events.count { "presentation request show=true" in it })
         verify(panels.constructed().single(), never()).dismiss()
+
+        output.onRouteRequested(HIDDEN)
+        idle()
+        verify(panels.constructed().single(), never()).dismiss()
+        output.onRouteRequested(NO_ROUTE)
+        idle()
+        clearInvocations(controller, sink)
+        output.onRouteRequested(HIDDEN)
+        output.onSessionChanged()
+        idle()
+        assertEquals(1, panels.constructed().size)
+        verifyNoInteractions(sink)
+        verify(controller, never()).setClusterOutputVisible(true)
     }
 
     @Test fun theWindowWaitsForAValidSurfaceBeforeClaimingProjectionOrPhoneUi() {
