@@ -3,6 +3,8 @@ package com.shilapi.xcertplay
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import com.shilapi.xcertplay.airplay.AirPlayConfig
 import com.shilapi.xcertplay.airplay.AirPlayIdentity
 import org.junit.After
@@ -12,6 +14,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.LooperMode
 import org.robolectric.shadows.ShadowMediaCodecList
@@ -111,6 +114,21 @@ class CarPlayHostResolutionTest {
         assertTrue(DisplayDiagnosticSnapshot.report(activity).contains("software_decoder"))
     }
 
+    @Test fun firstDisplaySizeIsAppliedWithoutTheSettleDebounce() {
+        // Nothing has been applied yet, so this is the cold-start canvas and must not wait 500 ms.
+        assertNull(get("activeDisplaySize"))
+        scheduleDisplaySize(1920, 990)
+        val delay = nextScheduledDelayMillis()
+        assertTrue("first size must apply immediately, was ${delay}ms", delay < 250L)
+    }
+
+    @Test fun laterDisplaySizeChangesKeepTheSettleDebounce() {
+        set("activeDisplaySize", displaySize(1920, 990))
+        scheduleDisplaySize(1920, 944)
+        val delay = nextScheduledDelayMillis()
+        assertTrue("later size must keep the 500 ms debounce, was ${delay}ms", delay >= 250L)
+    }
+
     private fun config(percent: Int, uiPercent: Int = 100, width: Int = 1920, height: Int = 990): AirPlayConfig {
         set("displayScalePercent", percent)
         set("uiScalePercent", uiPercent)
@@ -139,6 +157,23 @@ class CarPlayHostResolutionTest {
         val codec = MediaCodecInfoBuilder.newBuilder().setName("c2.test.hardware")
             .setIsHardwareAccelerated(hardware).setIsSoftwareOnly(!hardware).setCapabilities(capabilities).build()
         ShadowMediaCodecList.addCodec(codec)
+    }
+
+    private fun displaySize(width: Int, height: Int): Any {
+        val sizeClass = Class.forName("com.shilapi.xcertplay.CarPlayHostActivity\$DisplaySize")
+        return sizeClass.getDeclaredConstructor(Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
+            .apply { isAccessible = true }.newInstance(width, height)
+    }
+
+    private fun scheduleDisplaySize(width: Int, height: Int) {
+        activity.javaClass.getDeclaredMethod("scheduleDisplaySize",
+            Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
+            .apply { isAccessible = true }.invoke(activity, width, height)
+    }
+
+    private fun nextScheduledDelayMillis(): Long {
+        val shadow = shadowOf(Looper.getMainLooper())
+        return shadow.nextScheduledTaskTime.toMillis() - SystemClock.uptimeMillis()
     }
 
     private fun get(name: String): Any? = activity.javaClass.getDeclaredField(name)

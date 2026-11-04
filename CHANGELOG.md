@@ -16,6 +16,10 @@
 - 新增四种失败原因并给出各自的处置建议：蓝牙链路故障（`WIRELESS_BLUETOOTH_LINK_FAILED`）、手机未响应（`WIRELESS_PHONE_NOT_RESPONDING`）、MFi 认证失败（`WIRELESS_AUTHENTICATION_FAILED`）、无线隧道未建立（`WIRELESS_TUNNEL_NOT_STARTED`）。此前这些情况要么一直停在「正在连接」，要么只能等到五分钟总超时。
 - 计时预算按实车日志校准：RFCOMM 连接约 1–2 s，CSM＋识别＋MFi 均在 0.5 s 内，各阶段预算都远大于实测值，只在手机真正卡住时触发。
 - 每个阶段都会输出 `bootstrap phase=… sincePreviousMs=…` 进度日志，失败时输出 `bootstrap stall reached=… missing=… waitedMs=…`，方便区分是蓝牙、手机还是认证的问题。
+## 冷启动画布尺寸立即应用
+
+- 首次取得有效显示尺寸时立即应用，不再等待 500ms 防抖，减少冷启动时 CarPlay 建栈前的固定等待。
+- 后续尺寸变化（系统栏显隐、旋转、分屏、相机窗口等）仍保留 500ms 防抖，避免瞬时窗口抖动触发多次重建。
 
 ## USB 插入不再打断无线 CarPlay
 
