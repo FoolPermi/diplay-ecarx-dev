@@ -552,6 +552,9 @@ class CarPlayController(
             if (closed) return
         }
         connectionDiagnostic("start transport=${config.transport}")
+        if (config.transport == CarPlayTransport.WIRELESS) {
+            sampleWirelessStart(CarPlayStartupTimeline.Stage.CONTROLLER_START, wirelessGeneration.get())
+        }
         if (!hasRequiredUsbService()) return
         videoListener?.let { listener ->
             videoGate = VideoInCarGate(
@@ -1060,6 +1063,7 @@ class CarPlayController(
                 }
                 if (closed || phase != Phase.MFI) return@execute
                 mfiSession = MfiSession(client, null)
+                sampleWirelessStart(CarPlayStartupTimeline.Stage.LOCAL_MFI_READY, wirelessGeneration.get())
                 debugLog("mfi local offline ready protocolMajor=${client.protocolMajor()} certificateBytes=${client.readCertificate().size}")
                 onStatus(CarPlayStatus.MfiReady)
                 startPhone()
@@ -1360,6 +1364,14 @@ class CarPlayController(
         }
     }
 
+    private fun sampleWirelessStart(stage: CarPlayStartupTimeline.Stage, generation: Int,
+                                    attempt: Int? = null) {
+        if (config.transport == CarPlayTransport.WIRELESS) {
+            CarPlayStartupTimeline.record(appContext, stage, config.wirelessHotspotMode,
+                generation = generation, owner = System.identityHashCode(this), attempt = attempt)
+        }
+    }
+
     private fun startWireless(expectedGeneration: Int? = null) {
         val generation = synchronized(wirelessResourceLock) {
             if (closed || expectedGeneration != null && expectedGeneration != wirelessGeneration.get()) return
@@ -1401,6 +1413,7 @@ class CarPlayController(
 
     private fun runWireless(generation: Int) {
         try {
+            sampleWirelessStart(CarPlayStartupTimeline.Stage.WIRELESS_RUN_START, generation)
             debugLog("wireless bring-up generation=$generation starting")
             closeWirelessStack(generation = generation)
             if (
@@ -1452,6 +1465,7 @@ class CarPlayController(
             if (isStaleWirelessRun(generation)) {
                 return
             }
+            sampleWirelessStart(CarPlayStartupTimeline.Stage.NETWORK_BACKEND_READY, generation)
             pauseWifiScans(hotspotInfo.backend)
             val startedHotspot = hotspot
             wirelessConnectionProof.begin(generation) {
@@ -1487,6 +1501,7 @@ class CarPlayController(
                     "Wireless hotspot link-local IPv6 address is not scoped",
                 )
             }
+            sampleWirelessStart(CarPlayStartupTimeline.Stage.ENDPOINT_READY, generation)
             val hostAddressText = hostAddressText(hostAddress)
             val deviceIdentifier = hotspotInfo.bssid
                 ?.takeUnless { it.equals(ADAPTER_ADDRESS_PLACEHOLDER, ignoreCase = true) }
@@ -1575,6 +1590,7 @@ class CarPlayController(
                     }
                 }
             }
+            sampleWirelessStart(CarPlayStartupTimeline.Stage.AIRPLAY_LISTENING, generation)
             val listenerPort = service.boundPort() ?: wirelessAirPlayConfig.port
             val advertisedAirPlayConfig = wirelessAirPlayConfig.copy(port = listenerPort)
             debugLog(
@@ -1612,6 +1628,7 @@ class CarPlayController(
                 bonjourClient.start()
             }
             startedBonjour = bonjourClient
+            sampleWirelessStart(CarPlayStartupTimeline.Stage.BONJOUR_STARTED, generation)
             diagnostics.start()
             debugLog("wireless Bonjour services started mode=interface iface=${hotspotInfo.interfaceName ?: "unknown"}")
             if (isStaleWirelessRun(generation)) {
@@ -1694,6 +1711,7 @@ class CarPlayController(
                     }
                     val connectMillis = elapsedMillis(started)
                     connectionDiagnostic("Bluetooth connect completed attempt=${attempt.number} elapsedMs=$connectMillis")
+                    sampleWirelessStart(CarPlayStartupTimeline.Stage.RFCOMM_CONNECTED, generation, attempt.number)
                     attempt.stage = WirelessBootstrapRecovery.Stage.CSM
                     stageStarted = System.nanoTime()
                     val bootstrap = synchronized(wirelessResourceLock) {
@@ -1775,10 +1793,22 @@ class CarPlayController(
                             beginStartSessionDispatch(generation, attempt, startSessionSent, ::validateInfrastructure)
                         },
                         onStartSessionSent = {
-                            if (attempt.isCurrent) watchdog.startSessionSent(it.sentAtNanos)
+                            if (attempt.isCurrent) {
+                                watchdog.startSessionSent(it.sentAtNanos)
+                                sampleWirelessStart(CarPlayStartupTimeline.Stage.START_SESSION_SENT, generation, attempt.number)
+                            }
                         },
                         onBootstrapPhase = { reached ->
-                            if (attempt.isCurrent) bootstrap.mark(reached)
+                            if (attempt.isCurrent) {
+                                bootstrap.mark(reached)
+                                when (reached) {
+                                    Iap2BootstrapPhase.CSM_ESTABLISHED -> sampleWirelessStart(
+                                        CarPlayStartupTimeline.Stage.IAP2_CSM_READY, generation, attempt.number)
+                                    Iap2BootstrapPhase.MFi_AUTHENTICATED -> sampleWirelessStart(
+                                        CarPlayStartupTimeline.Stage.IPHONE_MFI_ACCEPTED, generation, attempt.number)
+                                    else -> Unit
+                                }
+                            }
                         },
                         onIncoming = { if (attempt.isCurrent) onRouteFrame(it, "wireless-rfcomm") },
                         onProgress = { message ->
@@ -1900,6 +1930,7 @@ class CarPlayController(
                         "(active=${wirelessActiveReported.get()} handoffInProgress=$handoffInProgress)",
                 )
             } else {
+                sampleWirelessStart(CarPlayStartupTimeline.Stage.WIRELESS_FAILED, generation)
                 debugLog("wireless bring-up failed", error)
                 if (error is Error) throw error
                 // A link that "connected" at once and failed without a byte may never have been
@@ -1988,10 +2019,15 @@ class CarPlayController(
     private fun wirelessSessionListener(generation: Int, watchdog: FirstTcpWatchdog): AirPlaySessionListener =
         object : AirPlaySessionListener by sessionListener {
             private var reportedFrameSession: AirPlaySession? = null
+            private val firstTcpSampled = AtomicBoolean(false)
 
             override fun onTcpAccepted(event: AirPlayTcpAccepted) {
                 if (isStaleWirelessRun(generation)) return
-                if (watchdog.accepted(event)) wirelessDiagnostics?.connectionAccepted()
+                if (watchdog.accepted(event)) {
+                    wirelessDiagnostics?.connectionAccepted()
+                    if (firstTcpSampled.compareAndSet(false, true)) sampleWirelessStart(
+                        CarPlayStartupTimeline.Stage.AIRPLAY_TCP_ACCEPTED, generation)
+                }
             }
 
             override fun onTransportError(message: String) {
@@ -2011,6 +2047,7 @@ class CarPlayController(
                     it.close()
                 }
                 wirelessConnectionProof.activate(generation, session)
+                sampleWirelessStart(CarPlayStartupTimeline.Stage.AIRPLAY_SESSION_ACTIVE, generation)
                 // Keep wirelessActiveReported false until maybeCompleteWirelessHandoff() closes
                 // the Bluetooth bootstrap after the tunneled iAP2 channel is ready.
                 sessionListener.onSessionActive(session)
@@ -2038,6 +2075,7 @@ class CarPlayController(
                     }
                 }
                 if (firstFrame) {
+                    sampleWirelessStart(CarPlayStartupTimeline.Stage.VIDEO_FIRST_FRAME, generation)
                     clusterOutputStateListener?.invoke()
                     uiListener?.onVideoFrameRendered(session)
                 }

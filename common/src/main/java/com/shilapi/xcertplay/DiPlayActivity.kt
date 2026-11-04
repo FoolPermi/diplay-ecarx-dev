@@ -76,6 +76,7 @@ import com.shilapi.xcertplay.network.CarHotspotTethering
 import com.shilapi.xcertplay.network.HotspotCredentials
 import com.shilapi.xcertplay.network.WifiP2pChannels
 import com.shilapi.xcertplay.orchestration.ManualHotspotSecurity
+import com.shilapi.xcertplay.orchestration.CarPlayStartupTimeline
 import com.shilapi.xcertplay.orchestration.ManualHotspotValidation
 import com.shilapi.xcertplay.orchestration.MfiTarget
 import com.shilapi.xcertplay.orchestration.WirelessHotspotMode
@@ -351,6 +352,8 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        CarPlayStartupTimeline.record(this, CarPlayStartupTimeline.Stage.LAUNCHER_CREATE,
+            AirPlayPersistence.loadWirelessHotspotMode(this))
         // Back on the home page finishes this activity while the session runs on, so the icon lands here.
         if (savedInstanceState == null && isLauncherIntent(intent) && CarPlayBackgroundSession.hasSession()) {
             openProjection(); finish(); return
@@ -504,6 +507,8 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
 
     override fun onResume() {
         super.onResume()
+        CarPlayStartupTimeline.record(this, CarPlayStartupTimeline.Stage.LAUNCHER_RESUME,
+            AirPlayPersistence.loadWirelessHotspotMode(this))
         WheelKeyService.restoreIfNeeded(this)
         applyFullscreenMode()
         // Returning from another activity can bring the head unit's own density back.
@@ -538,6 +543,8 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                     if (isFinishing || isDestroyed || CarPlayBackgroundSession.hasSession()) {
                         return@postDelayed
                     }
+                    CarPlayStartupTimeline.record(this, CarPlayStartupTimeline.Stage.AUTO_CONNECT_DISPATCH,
+                        AirPlayPersistence.loadWirelessHotspotMode(this))
                     connectWithSource(DiPlayPreferences.autoConnectWireless(this), ConnectionTraceSource.APP_LAUNCH)
                 }, if (autoHotspotWanted()) 0L else AUTO_CONNECT_AFTER_LAUNCH_MILLIS)
             }
@@ -2646,6 +2653,8 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         hotspotStartupRunning = true
         hotspotStartupResult = null
         hotspotStartupPhase = CarHotspotSetup.Phase.CHECKING
+        CarPlayStartupTimeline.record(this, CarPlayStartupTimeline.Stage.HOTSPOT_PREPARE_BEGIN,
+            AirPlayPersistence.loadWirelessHotspotMode(this))
         render()
         val app = applicationContext
         Thread({
@@ -2677,6 +2686,10 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
                     return@runOnUiThread
                 }
                 hotspotStartupResult = result
+                if (result == CarHotspotTethering.Result.READY) {
+                    CarPlayStartupTimeline.record(this, CarPlayStartupTimeline.Stage.HOTSPOT_PREPARE_END,
+                        AirPlayPersistence.loadWirelessHotspotMode(this))
+                }
                 hotspotStartupPhase = if (result == CarHotspotTethering.Result.READY) CarHotspotSetup.Phase.READY else null
                 if (saved != null) {
                     pendingCarHotspotSetup = false
@@ -4636,6 +4649,8 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         }
         val open = {
             ConnectionDiagnostics.record(this, source, ConnectionTraceEvent.PROJECTION_REQUESTED)
+            if (wireless) CarPlayStartupTimeline.record(this, CarPlayStartupTimeline.Stage.PROJECTION_REQUEST,
+                AirPlayPersistence.loadWirelessHotspotMode(this))
             AirPlayPersistence.saveWirelessEnabled(this, wireless)
             openProjection()
         }
@@ -4909,6 +4924,7 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
         appendLine()
         appendLine("--- Last received boot and app-launch result ---")
         appendLine(StartupDiagnosticSnapshot.report(appContext))
+        appendLine(CarPlayStartupTimeline.report(appContext))
         appendLine("Startup settings: openAfterBoot=${AirPlayPersistence.loadAutoStartOnBoot(appContext)} " +
             "connectWhenOpened=${DiPlayPreferences.autoConnect(appContext)}")
         appendLine("Car hotspot control: autoEnable=${CarHotspotSettings.enabled(appContext)} " +
