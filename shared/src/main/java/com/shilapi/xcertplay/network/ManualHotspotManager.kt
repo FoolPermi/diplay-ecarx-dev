@@ -175,8 +175,17 @@ class ManualHotspotManager(
         val expected = confirmed ?: throw WirelessStartupException(
             WirelessStartupFailure.HOTSPOT_NOT_READY, "Hotspot network is not ready",
         )
-        val current = selectHotspotInterface(interfaces.sample(), onDiagnostic)
-        if (closed || isCancelled() || current == null || !expected.sameAddress(current)) {
+        // Always re-sample so a changed ifindex/address is caught, but only print the whole
+        // candidate list when the check fails or the evidence changed. The four pre-publication
+        // re-checks would otherwise repeat the same lines on every connection.
+        val messages = mutableListOf<String>()
+        val current = selectHotspotInterface(interfaces.sample(), messages::add)
+        val failed = closed || isCancelled() || current == null || !expected.sameAddress(current)
+        if (failed || messages != lastSampleLog) {
+            messages.forEach(onDiagnostic)
+            lastSampleLog = messages
+        }
+        if (failed) {
             throw WirelessStartupException(WirelessStartupFailure.HOTSPOT_NOT_READY,
                 "Hotspot interface or address changed before publication")
         }
