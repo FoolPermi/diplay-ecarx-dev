@@ -418,6 +418,29 @@ class EcarxLaneGuidanceFlowTest {
         assertFalse(panelRequests.last())
     }
 
+    @Test fun instrumentVisibilityPersistsAcrossRoutesUntilDiPlayRestarts() {
+        for (initial in listOf(false, true)) {
+            EcarxOutputSettings.setAutoShowMap(context, initial)
+            initialize(); maneuver(); guidance()
+            assertEquals(initial, panelRequests.last())
+            DimInteraction.instance().callback.onShowPresentationOptionChanged(if (initial) 3 else 2)
+            shadowOf(Looper.getMainLooper()).idle()
+            assertEquals(!initial, panelRequests.last())
+            send(0x5201) { u8(1, 0) }
+            maneuver(); guidance()
+            assertEquals(!initial, panelRequests.last())
+
+            EcarxHudBridge.clear()
+            // Exit application kills the process; a fresh bridge must read the saved initial choice.
+            set("context", null)
+            NavigationOutputs.onAppOpened(context)
+            assertEquals(0, field("presentationOption").getInt(EcarxHudBridge))
+            maneuver(); guidance()
+            assertEquals(initial, panelRequests.last())
+            EcarxHudBridge.clear()
+        }
+    }
+
     @Test fun hiddenLanesStayCachedUntilThePhoneShowsThemAgain() {
         initialize()
         send(0x5204) {
