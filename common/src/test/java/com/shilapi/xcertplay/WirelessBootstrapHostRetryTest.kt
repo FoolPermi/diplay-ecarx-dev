@@ -101,6 +101,34 @@ class WirelessBootstrapHostRetryTest {
         assertEquals(View.GONE, wifiRecovery.visibility)
     }
 
+    @Test fun terminalFailureWhileSettingsOpenSurvivesCleanupAndClosingWithoutReconnect() {
+        ReflectionHelpers.setField(activity, "menuOpen", true)
+        report(terminalFailure)
+        report(CarPlayStatus.Failed("cleanup socket closed"))
+        assertSame(terminalFailure, ReflectionHelpers.getField(activity, "failurePendingAfterMenu"))
+        assertTrue(ReflectionHelpers.getField(activity, "startupRetryStopped"))
+        ReflectionHelpers.callInstanceMethod<Void>(activity, "finishSettingsMenu",
+            from(String::class.java, "Settings closed"), from(Boolean::class.javaPrimitiveType, false))
+        assertFalse(ReflectionHelpers.getField(activity, "menuOpen"))
+        assertNull(ReflectionHelpers.getField<Any?>(activity, "failurePendingAfterMenu"))
+        assertTrue(ReflectionHelpers.getField(activity, "startupRetryStopped"))
+        assertFalse(ReflectionHelpers.getField(activity, "reconnectScheduled"))
+        assertEquals(0, ReflectionHelpers.getField<Int>(activity, "restartGeneration"))
+        assertEquals(View.VISIBLE, retry.visibility)
+        assertTrue(stage.text.toString().contains("Bluetooth permission denied"))
+    }
+
+    @Test fun terminalFailureInMenuStopsAPreviouslyQueuedRetryImmediately() {
+        report(CarPlayStatus.Failed("connection reset"))
+        ReflectionHelpers.setField(activity, "menuOpen", true)
+        report(terminalFailure)
+        assertTrue(ReflectionHelpers.getField(activity, "startupRetryStopped"))
+        assertFalse(ReflectionHelpers.getField(activity, "reconnectScheduled"))
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(3))
+        assertEquals(0, ReflectionHelpers.getField<Int>(activity, "restartGeneration"))
+        assertSame(terminalFailure, ReflectionHelpers.getField(activity, "failurePendingAfterMenu"))
+    }
+
     private fun budget(): WirelessStartupRetryBudget = ReflectionHelpers.getField(activity, "startupRetryBudget")
 
     private fun report(status: CarPlayStatus) {

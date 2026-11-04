@@ -5412,6 +5412,10 @@ open class CarPlayHostActivity : ComponentActivity() {
             }
         }
 
+    private fun CarPlayStatus.Failed.requiresManualRetry(): Boolean =
+        usbPairingFailure != null || !automaticRetryAllowed ||
+            knownCause == ConnectionFailureCause.WIRELESS_CARPLAY_UNAVAILABLE
+
     private fun createStatusReporter(
         controllerGeneration: Int,
     ): (CarPlayStatus) -> Unit = report@{ status ->
@@ -5436,9 +5440,13 @@ open class CarPlayHostActivity : ComponentActivity() {
             callPopupSessionReady = false
         }
         if (menuOpen) {
-            if (status is CarPlayStatus.Failed && failurePendingAfterMenu?.usbPairingFailure == null) {
-                failurePendingAfterMenu = status
-                if (status.usbPairingFailure != null) startupRetryStopped = true
+            if (status is CarPlayStatus.Failed) {
+                // Keep a terminal prerequisite/rejection even if teardown later reports plain IO.
+                if (failurePendingAfterMenu?.requiresManualRetry() != true) failurePendingAfterMenu = status
+                if (status.requiresManualRetry()) {
+                    startupRetryStopped = true
+                    reconnectScheduled = false
+                }
             }
             return@report
         }
@@ -6377,7 +6385,7 @@ open class CarPlayHostActivity : ComponentActivity() {
             startupRetryBudget.manualRetry()
             startupRetryStopped = false
         }
-        if (failure != null && (failure.startupFailure != null || failure.usbPairingFailure != null) && !reconnect) {
+        if (failure != null && (failure.startupFailure != null || failure.requiresManualRetry()) && !reconnect) {
             createStatusReporter(restartGeneration)(failure)
         } else if (failure?.wifiResetRequired == true && (!reconnect || useWirelessTransport)) {
             createStatusReporter(restartGeneration)(failure)
