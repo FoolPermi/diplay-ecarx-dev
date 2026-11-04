@@ -11,6 +11,26 @@
 - 热点检测改为分级确认：首个采样已显示 AP 已开、接口已在 `getTetheredIfaces()` 中且地址可用时，稳定采样由 3 次缩短为 2 次（少等一个 250ms 轮询）；热点刚启动、接口或地址发生变化时仍保留 3 次完整确认。
 - `validateReady()` 仍每次重新读取接口，但只在接口/地址变化或校验失败时输出候选网卡明细，消除单次连接最多 4 轮重复的网卡枚举日志。
 - 不跨热点开关周期缓存 `ifindex` 或 IPv6 `scopeId`；每次采样都重新读取，`wlan0` 的 index 在 13/14 间变化也能正确识别为变更并重新确认。
+## 无线关闭不再被 Bonjour 阻塞
+
+- 拆分无线栈关闭的同步与异步路径：同步路径只做必须与建链保持顺序的工作（失效当前 generation、解绑 AirPlay、关闭 iAP2 隧道与 RFCOMM bootstrap、释放热点），Bonjour 的 JmDNS 关闭、MulticastLock 释放与工作线程回收改到独立守护线程执行。
+- 关闭 JmDNS 期间不再持有全局资源锁。实车日志中单次 `teardown resource=Bonjour` 曾达到 22 秒、多次 4~5 秒，期间整个无线 teardown 与下一次重连都被阻塞；现在资源锁只覆盖瞬时操作。
+- AirPlay 服务解绑提到 Bonjour 之前，先停止广播与接收连接，不用排在可能阻塞的 JmDNS 关闭之后。
+- 异步清理只关闭关闭时捕获的旧 generation 实例，新会话使用自己的 `CarPlayBonjour`，旧 generation 的迟到清理不会影响新会话。
+## iAP2 握手进度看门狗（无线 CarPlay）
+
+- 无线 CarPlay 的蓝牙握手新增独立的进度看门狗，按阶段分别计时，不再只靠 AirPlay TCP 的 `FirstTcpWatchdog` 或一个统一的控制环超时：
+  - RFCOMM 已连接 → CSM 已建立（15 s）：等了 CSM 仍没起来，判定为「蓝牙链路故障」。
+  - CSM 已建立 → MFi 认证完成（30 s）：链路通了但手机不应答识别/MFi，判定为「手机未响应」。
+  - MFi 认证完成 → WirelessCarPlayAvailable／TransportIdentifier／StartSession（65 s，为 60 s 传输等待之上的兜底；部分进度后 45 s）：认证完成却不再推进，判定为手机停在握手中。
+  - StartSession 已发送之后交给 `FirstTcpWatchdog` 与无线交接看门狗；Tunnel 建立是本看门狗的终止点，不再重复计时，避免与既有超时互相打断。
+- 新增四种失败原因并给出各自的处置建议：蓝牙链路故障（`WIRELESS_BLUETOOTH_LINK_FAILED`）、手机未响应（`WIRELESS_PHONE_NOT_RESPONDING`）、MFi 认证失败（`WIRELESS_AUTHENTICATION_FAILED`）、无线隧道未建立（`WIRELESS_TUNNEL_NOT_STARTED`）。此前这些情况要么一直停在「正在连接」，要么只能等到五分钟总超时。
+- 计时预算按实车日志校准：RFCOMM 连接约 1–2 s，CSM＋识别＋MFi 均在 0.5 s 内，各阶段预算都远大于实测值，只在手机真正卡住时触发。
+- 每个阶段都会输出 `bootstrap phase=… sincePreviousMs=…` 进度日志，失败时输出 `bootstrap stall reached=… missing=… waitedMs=…`，方便区分是蓝牙、手机还是认证的问题。
+## 冷启动画布尺寸立即应用
+
+- 首次取得有效显示尺寸时立即应用，不再等待 500ms 防抖，减少冷启动时 CarPlay 建栈前的固定等待。
+- 后续尺寸变化（系统栏显隐、旋转、分屏、相机窗口等）仍保留 500ms 防抖，避免瞬时窗口抖动触发多次重建。
 
 ## USB 插入不再打断无线 CarPlay
 

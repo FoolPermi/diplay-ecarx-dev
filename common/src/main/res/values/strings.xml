@@ -603,6 +603,10 @@
     <string name="hotspot_control_failed">The car could not start its hotspot. Open the hotspot in car settings.</string>
     <string name="wireless_carplay_unavailable">This iPhone says it cannot use wireless CarPlay right now</string>
     <string name="wireless_transport_not_started">This iPhone did not start the wireless CarPlay transport</string>
+    <string name="wireless_bluetooth_link_failed">The Bluetooth link to the iPhone did not become an iAP2 session</string>
+    <string name="wireless_phone_not_responding">The iPhone stopped responding during the wireless handshake</string>
+    <string name="wireless_authentication_failed">The iPhone did not accept MFi authentication</string>
+    <string name="wireless_tunnel_not_started">The iPhone did not bring up the wireless CarPlay tunnel</string>
     <string name="location_reporting_reconnects">Changing this setting reconnects an active CarPlay session.</string>
     <string name="diagnostic_report_saved_in_app">Your report was saved privately in DiPlay because a public save location was unavailable. Share it or view it here. Nothing is sent automatically.</string>
     <string name="diagnostic_report_saved_to_path">Your report was saved to:\n%1$s\n\nYou can also share it or view it here. Nothing is sent automatically.</string>
@@ -818,6 +822,10 @@
     <string name="connection_help_existing_wifi">Make sure the head unit and the iPhone are on the same Wi-Fi network and its name and password match DiPlay settings, then retry.</string>
     <string name="connection_help_wireless_carplay_unavailable">The iPhone authenticated over Bluetooth and then answered that this car cannot use wireless CarPlay. On the iPhone, make sure Wi-Fi is on and not joined to another network; then remove this car in Settings → General → CarPlay and pair it again, connecting wirelessly first.</string>
     <string name="connection_help_wireless_transport_not_started">The iPhone authenticated over Bluetooth but never asked for the wireless link. Unlock it, confirm Wi-Fi is on, keep it nearby, and retry. If it still fails, remove this car in Settings → General → CarPlay and pair it again.</string>
+    <string name="connection_help_wireless_bluetooth_link_failed">The head unit reached the iPhone over Bluetooth but the iPhone never opened the iAP2 control session. Move the iPhone closer, make sure it is unlocked, and retry. If it keeps failing, remove this car in Settings → General → CarPlay and pair it again.</string>
+    <string name="connection_help_wireless_phone_not_responding">The iPhone connected but stopped answering during the wireless CarPlay handshake. Unlock it, keep it near the head unit, and retry. Save a diagnostic report if it still fails.</string>
+    <string name="connection_help_wireless_authentication_failed">The iPhone did not accept the MFi authentication of this head unit, so wireless CarPlay cannot start. Remove this car in Settings → General → CarPlay, pair it again, and retry. If it still fails, the MFi certificate on the head unit may need to be restored.</string>
+    <string name="connection_help_wireless_tunnel_not_started">The iPhone authenticated over Bluetooth but the Wi-Fi CarPlay tunnel never came up. Keep Wi-Fi on, stay near the head unit, and retry. If it still fails, remove this car in Settings → General → CarPlay and pair it again.</string>
     <string name="settings_report_on_phone">Get the report on a phone</string>
     <string name="settings_report_on_phone_hint">Scan the code with the phone camera to open this page in its browser, then choose Download report. Keep this screen open until the download has finished.</string>
     <string name="settings_mfi_target_description">Choose USB/CH341 only while a CH341 authentication adapter is connected to the head unit. Without one, choose Local offline. Applies at the next connection.</string>

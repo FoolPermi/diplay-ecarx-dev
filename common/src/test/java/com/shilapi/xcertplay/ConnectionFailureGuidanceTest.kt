@@ -55,6 +55,17 @@ class ConnectionFailureGuidanceTest {
             known = ConnectionFailureCause.WIFI_DIRECT_CHANNEL_UNAVAILABLE, mode = WirelessHotspotMode.WIFI_P2P))
     }
 
+    @Test fun bootstrapCausesNameTheirOwnHelp() {
+        assertEquals(R.string.connection_help_wireless_bluetooth_link_failed,
+            guide("bt", known = ConnectionFailureCause.WIRELESS_BLUETOOTH_LINK_FAILED))
+        assertEquals(R.string.connection_help_wireless_phone_not_responding,
+            guide("silent", known = ConnectionFailureCause.WIRELESS_PHONE_NOT_RESPONDING))
+        assertEquals(R.string.connection_help_wireless_authentication_failed,
+            guide("auth", known = ConnectionFailureCause.WIRELESS_AUTHENTICATION_FAILED))
+        assertEquals(R.string.connection_help_wireless_tunnel_not_started,
+            guide("tunnel", known = ConnectionFailureCause.WIRELESS_TUNNEL_NOT_STARTED))
+    }
+
     @Test fun aHotspotCauseNamesItsOwnHelp() {
         assertEquals(R.string.connection_help_car_hotspot_off, guide(carHotspotOff,
             startup = WirelessStartupFailure.HOTSPOT_CONFIGURATION, known = ConnectionFailureCause.CAR_HOTSPOT_OFF))
