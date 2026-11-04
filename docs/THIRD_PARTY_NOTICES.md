@@ -20,7 +20,7 @@ CarPlay and the CarPlay icon are Apple Inc. marks/assets. This asset is not cove
 
 ## Runtime dependencies
 
-- AndroidX and Jetpack Compose — Android Open Source Project; Apache License 2.0.
+- AndroidX — Android Open Source Project; Apache License 2.0.
 - Kotlin standard library — JetBrains; Apache License 2.0.
 - Bouncy Castle 1.79 — The Legion of the Bouncy Castle Inc.; Bouncy Castle license (MIT-style).
 - JmDNS 3.6.3 — JmDNS contributors; Apache License 2.0.
