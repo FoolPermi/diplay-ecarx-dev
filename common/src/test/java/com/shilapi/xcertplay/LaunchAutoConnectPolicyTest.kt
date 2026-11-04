@@ -13,11 +13,11 @@ class LaunchAutoConnectPolicyTest {
     @Test fun manualHotspotAlreadyOnDispatchesImmediatelyAndLateOnDispatchesEarly() {
         assertEquals(LaunchAutoConnectPolicy.Plan.WAIT_FOR_CAR_HOTSPOT,
             LaunchAutoConnectPolicy.plan(true, WirelessHotspotMode.MANUAL, false))
-        assertEquals(0, LaunchAutoConnectPolicy.carHotspotDelayMillis(true, 100))
-        assertEquals(200, LaunchAutoConnectPolicy.carHotspotDelayMillis(false, 1_000))
-        assertEquals(150, LaunchAutoConnectPolicy.carHotspotDelayMillis(false, 4_850))
-        assertEquals(0, LaunchAutoConnectPolicy.carHotspotDelayMillis(false, 5_000))
-        assertEquals(0, LaunchAutoConnectPolicy.carHotspotDelayMillis(null, 5_500))
+        assertEquals(0L, LaunchAutoConnectPolicy.carHotspotDelayMillis(true, 100))
+        assertEquals(200L, LaunchAutoConnectPolicy.carHotspotDelayMillis(false, 1_000))
+        assertEquals(150L, LaunchAutoConnectPolicy.carHotspotDelayMillis(false, 4_850))
+        assertEquals(0L, LaunchAutoConnectPolicy.carHotspotDelayMillis(false, 5_000))
+        assertEquals(0L, LaunchAutoConnectPolicy.carHotspotDelayMillis(null, 5_500))
     }
 
     @Test fun automaticHotspotStillUsesPrepareAndOtherModesKeepExistingDelay() {
