@@ -3014,9 +3014,21 @@ class CarPlayController(
         }
     }
 
-    private fun closeWirelessStack(service: CarPlayVpnService? = vpnService, generation: Int? = null) =
+    /**
+     * Releases one wireless generation in two phases.
+     *
+     * The synchronous phase runs under [wirelessResourceLock] and only does work that must stay
+     * ordered with bring-up: it invalidates the generation, unbinds the AirPlay listener, closes the
+     * iAP2 tunnel and RFCOMM bootstrap, releases the hotspot, and detaches the Bonjour instance.
+     *
+     * The slow Bonjour teardown (closing JmDNS, releasing the MulticastLock and joining the worker)
+     * runs afterwards on its own thread. Closing JmDNS has been observed to block for tens of seconds,
+     * so waiting for it while holding the global resource lock starved every other operation.
+     */
+    private fun closeWirelessStack(service: CarPlayVpnService? = vpnService, generation: Int? = null) {
+        var bonjourToClose: CarPlayBonjour? = null
         synchronized(wirelessResourceLock) {
-            if (generation != null && generation != wirelessGeneration.get()) return@synchronized
+            if (generation != null && generation != wirelessGeneration.get()) return
             val owner = firstTcpWatchdog?.listener
             firstTcpWatchdog?.terminate()
             val diagnostics = wirelessDiagnostics
@@ -3024,19 +3036,27 @@ class CarPlayController(
             diagnostics?.close()
             wirelessConnectionProof.clear()
             media.setIapTunnelHandler(null)
+
+            // Unbind the AirPlay listener first: it stops advertising and accepting connections, and
+            // it must not queue behind a JmDNS teardown.
+            if (service != null && owner != null) closeBestEffort("AirPlay service") { service.detachWireless(owner) }
+
             val activeTunnel = wirelessTunnelChannel
             wirelessTunnelChannel = null
             if (activeTunnel != null) closeBestEffort("tunneled iAP2 link") { activeTunnel.close() }
 
             closeBluetoothBootstrapTransport()
 
-            val activeBonjour = bonjour
-            bonjour = null
-            if (activeBonjour != null) closeBestEffort("Bonjour") { activeBonjour.close() }
-
             val activeHotspot = hotspot
             hotspot = null
             if (activeHotspot != null) closeBestEffort("wireless hotspot") { activeHotspot.close() }
+
+            // Detach Bonjour but keep the reference for the asynchronous close. The captured instance
+            // belongs to this generation, so a teardown that lands after a new session took over only
+            // closes the stale instance and leaves the new one untouched.
+            bonjourToClose = bonjour
+            bonjour = null
+
             wirelessRuntimeIdentification = null
             wirelessAirPlayEndpoint = null
             wirelessPublishedAddress = null
@@ -3046,9 +3066,25 @@ class CarPlayController(
             wirelessTunnelReady.set(false)
             wirelessActiveReported.set(false)
             wirelessHandoffFellBack.set(false)
-
-            if (service != null && owner != null) closeBestEffort("AirPlay service") { service.detachWireless(owner) }
         }
+        closeBonjourOffLock(bonjourToClose)
+    }
+
+    /**
+     * Closes JmDNS, releases the MulticastLock and joins the Bonjour worker on a daemon thread, so a
+     * slow teardown can never hold [wirelessResourceLock] or delay the next generation's bring-up.
+     */
+    private fun closeBonjourOffLock(activeBonjour: CarPlayBonjour?) {
+        if (activeBonjour == null) return
+        debugLog("Bonjour teardown dispatched off the wireless resource lock")
+        Thread(
+            { closeBestEffort("Bonjour") { activeBonjour.close() } },
+            "diplay-bonjour-teardown",
+        ).apply {
+            isDaemon = true
+            start()
+        }
+    }
 
     private fun isBluetoothDeviceConnected(device: BluetoothDevice): Boolean = try {
         val method = BluetoothDevice::class.java.getMethod("isConnected")

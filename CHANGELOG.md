@@ -6,6 +6,13 @@
 
 使用手册正文已跟进到本段实现；页面截图仍是 v106 实车画面，各节标注了后续版本的实测状态。
 
+## 无线关闭不再被 Bonjour 阻塞
+
+- 拆分无线栈关闭的同步与异步路径：同步路径只做必须与建链保持顺序的工作（失效当前 generation、解绑 AirPlay、关闭 iAP2 隧道与 RFCOMM bootstrap、释放热点），Bonjour 的 JmDNS 关闭、MulticastLock 释放与工作线程回收改到独立守护线程执行。
+- 关闭 JmDNS 期间不再持有全局资源锁。实车日志中单次 `teardown resource=Bonjour` 曾达到 22 秒、多次 4~5 秒，期间整个无线 teardown 与下一次重连都被阻塞；现在资源锁只覆盖瞬时操作。
+- AirPlay 服务解绑提到 Bonjour 之前，先停止广播与接收连接，不用排在可能阻塞的 JmDNS 关闭之后。
+- 异步清理只关闭关闭时捕获的旧 generation 实例，新会话使用自己的 `CarPlayBonjour`，旧 generation 的迟到清理不会影响新会话。
+
 ## USB 插入不再打断无线 CarPlay
 
 - 新增「允许 USB 插入自动接管无线 CarPlay」开关，默认关闭。关闭时，已配置无线 CarPlay 的车机插 USB 充电只记录设备，不再切换到有线、不重建会话、也不请求 VPN 授权；「通过 USB 连接」仍按原方式主动使用有线。
