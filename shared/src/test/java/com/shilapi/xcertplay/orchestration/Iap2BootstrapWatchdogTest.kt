@@ -40,15 +40,28 @@ class Iap2BootstrapWatchdogTest {
     @Test fun eachCheckpointRearmsWithItsOwnBudget() {
         val watch = watchdog()
         watch.mark(Iap2BootstrapPhase.RFCOMM_CONNECTED)
-        assertEquals(15_000L, scheduledDelay)
+        assertEquals(Iap2BootstrapPolicy.RFCOMM_TO_CSM_MILLIS, scheduledDelay)
         watch.mark(Iap2BootstrapPhase.CSM_ESTABLISHED)
-        assertEquals(30_000L, scheduledDelay)
+        assertEquals(Iap2BootstrapPolicy.CSM_TO_MFI_MILLIS, scheduledDelay)
         watch.mark(Iap2BootstrapPhase.MFi_AUTHENTICATED)
-        assertEquals(65_000L, scheduledDelay)
+        assertEquals(Iap2BootstrapPolicy.MFI_TO_PROGRESS_MILLIS, scheduledDelay)
         watch.mark(Iap2BootstrapPhase.WIRELESS_CARPLAY_AVAILABLE)
-        assertEquals(45_000L, scheduledDelay)
+        assertEquals(Iap2BootstrapPolicy.PARTIAL_PROGRESS_MILLIS, scheduledDelay)
         watch.mark(Iap2BootstrapPhase.TRANSPORT_IDENTIFIED)
-        assertEquals(45_000L, scheduledDelay)
+        assertEquals(Iap2BootstrapPolicy.PARTIAL_PROGRESS_MILLIS, scheduledDelay)
+    }
+
+    @Test fun theCsmBudgetCoversTheObservedLongTail() {
+        // Real-car CSM bring-up has been observed as late as 34.6 s; the budget must not fire before
+        // then, and the blocking safety net must sit above the watchdog budget.
+        assertTrue(Iap2BootstrapPolicy.RFCOMM_TO_CSM_MILLIS > 34_626L)
+        assertTrue(WirelessBootstrapRecovery.CSM_TIMEOUT_MILLIS > Iap2BootstrapPolicy.RFCOMM_TO_CSM_MILLIS)
+        val watch = watchdog()
+        watch.mark(Iap2BootstrapPhase.RFCOMM_CONNECTED)
+        now = 34_626
+        watch.mark(Iap2BootstrapPhase.CSM_ESTABLISHED)
+        assertTrue(stalls.isEmpty())
+        assertEquals(Iap2BootstrapPolicy.CSM_TO_MFI_MILLIS, scheduledDelay)
     }
 
     @Test fun startSessionHandsOffAndTunnelBecomesTerminal() {
@@ -93,14 +106,14 @@ class Iap2BootstrapWatchdogTest {
     @Test fun aStallBeforeCsmIsABluetoothLinkFailure() {
         val watch = watchdog()
         watch.mark(Iap2BootstrapPhase.RFCOMM_CONNECTED)
-        now = 15_000
+        now = Iap2BootstrapPolicy.RFCOMM_TO_CSM_MILLIS
         timer!!()
         assertEquals(1, stalls.size)
         val stall = stalls.single()
         assertEquals(Iap2BootstrapPhase.RFCOMM_CONNECTED, stall.reached)
         assertEquals(Iap2BootstrapPhase.CSM_ESTABLISHED, stall.missing)
         assertEquals(ConnectionFailureCause.WIRELESS_BLUETOOTH_LINK_FAILED, stall.cause)
-        assertEquals(15_000L, stall.waitedMillis)
+        assertEquals(Iap2BootstrapPolicy.RFCOMM_TO_CSM_MILLIS, stall.waitedMillis)
         assertTrue(watch.finished)
     }
 
@@ -136,10 +149,10 @@ class Iap2BootstrapWatchdogTest {
         watch.mark(Iap2BootstrapPhase.CSM_ESTABLISHED)
         val secondTimer = timer!!
         // The first timer belongs to the RFCOMM stage and was superseded by the CSM stage.
-        now = 15_000
+        now = Iap2BootstrapPolicy.RFCOMM_TO_CSM_MILLIS
         firstTimer()
         assertTrue(stalls.isEmpty())
-        now = 15_000 + 30_000
+        now = Iap2BootstrapPolicy.RFCOMM_TO_CSM_MILLIS + Iap2BootstrapPolicy.CSM_TO_MFI_MILLIS
         secondTimer()
         assertEquals(1, stalls.size)
     }
@@ -147,10 +160,10 @@ class Iap2BootstrapWatchdogTest {
     @Test fun aMarkAfterAFailureIsIgnored() {
         val watch = watchdog()
         watch.mark(Iap2BootstrapPhase.RFCOMM_CONNECTED)
-        now = 15_000
+        now = Iap2BootstrapPolicy.RFCOMM_TO_CSM_MILLIS
         timer!!()
         watch.mark(Iap2BootstrapPhase.CSM_ESTABLISHED)
-        assertEquals(15_000L, scheduledDelay)
+        assertEquals(Iap2BootstrapPolicy.RFCOMM_TO_CSM_MILLIS, scheduledDelay)
         assertEquals(1, stalls.size)
     }
 

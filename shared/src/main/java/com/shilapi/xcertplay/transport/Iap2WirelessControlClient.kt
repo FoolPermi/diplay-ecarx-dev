@@ -38,6 +38,9 @@ class Iap2WirelessControlClient(
         // keeps polling for the whole control-loop budget while the screen says it is connecting.
         // Disabled by default: the runtime tunnel loop starts after the transport already exists.
         transportWaitMillis: Long = NO_TRANSPORT_WAIT_MILLIS,
+        // Bluetooth bootstrap must not borrow the long-lived runtime control-loop budget.
+        // Null preserves the existing tunnel caller contract.
+        handshakeTimeoutMillis: Long? = null,
         onProgress: (String) -> Unit = {},
         // Structured progress checkpoints for the bootstrap watchdog. The runtime tunnel loop,
         // which starts after the transport already exists, leaves this at the default.
@@ -53,27 +56,30 @@ class Iap2WirelessControlClient(
             "transportWaitMillis must be in 1..$MAX_TIMEOUT_MILLIS or NO_TRANSPORT_WAIT_MILLIS"
         }
 
+        require(handshakeTimeoutMillis == null || handshakeTimeoutMillis in 1..MAX_TIMEOUT_MILLIS)
         val deadline = WirelessControlDeadline(timeoutMillis)
+        val handshakeDeadline = handshakeTimeoutMillis?.let(::WirelessControlDeadline) ?: deadline
+        fun handshakeRemaining(): Long = minOf(deadline.requireRemaining(), handshakeDeadline.requireRemaining())
         val identified = identification.withVehicleStatusFrom(vehicleStatusProvider)
         if (identified.vehicleStatusEnabled != identification.vehicleStatusEnabled) {
             onProgress("iap2 no battery reading: not declaring an electric vehicle")
         }
         Iap2IdentificationClient(session).identify(
             identified,
-            deadline.requireRemaining(),
+            handshakeRemaining(),
             onProgress,
             onLinkReady = { onBootstrapPhase(Iap2BootstrapPhase.CSM_ESTABLISHED) },
         )
         onProgress("iap2 identification accepted")
         var stage = Iap2WirelessControlStage.IDENTIFIED
 
-        mfi.run(session, deadline.requireRemaining(), onProgress)
+        mfi.run(session, handshakeRemaining(), onProgress)
         onBootstrapPhase(Iap2BootstrapPhase.MFi_AUTHENTICATED)
         stage = Iap2WirelessControlStage.AUTHENTICATED
         onProgress("iap2 authentication accepted")
 
         for (subscription in Iap2WiredControlClient.subscriptions()) {
-            session.send(subscription, deadline.requireRemaining())
+            session.send(subscription, handshakeRemaining())
         }
         stage = Iap2WirelessControlStage.SUBSCRIBED
         onProgress("iap2 subscriptions sent")
@@ -153,6 +159,7 @@ class Iap2WirelessControlClient(
                             transportNotificationSeen,
                             postTransportWiFiConfigurationsSent,
                             wirelessCarPlayAvailableSeen,
+                            wirelessUnavailableReported,
                         )
                     }
                     if (deadline.remainingMillis(keepAliveAfterDeadline) == 0L) {
@@ -165,6 +172,7 @@ class Iap2WirelessControlClient(
                             transportNotificationSeen,
                             postTransportWiFiConfigurationsSent,
                             wirelessCarPlayAvailableSeen,
+                            wirelessUnavailableReported,
                         )
                     }
                     continue

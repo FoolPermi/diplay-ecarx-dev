@@ -5412,6 +5412,10 @@ open class CarPlayHostActivity : ComponentActivity() {
             }
         }
 
+    private fun CarPlayStatus.Failed.requiresManualRetry(): Boolean =
+        usbPairingFailure != null || !automaticRetryAllowed ||
+            knownCause == ConnectionFailureCause.WIRELESS_CARPLAY_UNAVAILABLE
+
     private fun createStatusReporter(
         controllerGeneration: Int,
     ): (CarPlayStatus) -> Unit = report@{ status ->
@@ -5436,9 +5440,13 @@ open class CarPlayHostActivity : ComponentActivity() {
             callPopupSessionReady = false
         }
         if (menuOpen) {
-            if (status is CarPlayStatus.Failed && failurePendingAfterMenu?.usbPairingFailure == null) {
-                failurePendingAfterMenu = status
-                if (status.usbPairingFailure != null) startupRetryStopped = true
+            if (status is CarPlayStatus.Failed) {
+                // Keep a terminal prerequisite/rejection even if teardown later reports plain IO.
+                if (failurePendingAfterMenu?.requiresManualRetry() != true) failurePendingAfterMenu = status
+                if (status.requiresManualRetry()) {
+                    startupRetryStopped = true
+                    reconnectScheduled = false
+                }
             }
             return@report
         }
@@ -5447,7 +5455,7 @@ open class CarPlayHostActivity : ComponentActivity() {
         val englishDescription = status.describe(englishResources)
         val knownCause = (status as? CarPlayStatus.Failed)?.knownCause
         // Once the retries stopped, a later failure of the same attempt, such as its cleanup, keeps the line saying so.
-        if (!startupRetryStopped || status !is CarPlayStatus.Failed || status.usbPairingFailure != null) {
+        if (!startupRetryStopped || status !is CarPlayStatus.Failed || status.requiresManualRetry()) {
             if (knownCause != null) setConnectionStage(ConnectionFailureGuidance.stage(knownCause))
             else setConnectionStage(description, englishDescription)
             LastConnectionProblem.follow(this, status)
@@ -5466,9 +5474,9 @@ open class CarPlayHostActivity : ComponentActivity() {
                 startupRetryButton?.visibility = View.VISIBLE
             } else if (status.wifiResetRequired) {
                 wifiRecoveryButton?.visibility = View.VISIBLE
-            } else if (status.knownCause == ConnectionFailureCause.WIRELESS_CARPLAY_UNAVAILABLE) {
-                // The iPhone answered for itself: repeating the same handshake cannot change its mind
-                // until the driver acts on the phone. Say so once and wait for a manual retry.
+            } else if (!status.automaticRetryAllowed || status.knownCause == ConnectionFailureCause.WIRELESS_CARPLAY_UNAVAILABLE) {
+                // Permission/radio/pairing prerequisites and explicit protocol rejection require
+                // driver action. Do not turn a stopped local recovery into a full-stack retry loop.
                 startupRetryStopped = true
                 reconnectScheduled = false
                 wifiRecoveryButton?.visibility = View.GONE
@@ -6384,7 +6392,7 @@ open class CarPlayHostActivity : ComponentActivity() {
             startupRetryBudget.manualRetry()
             startupRetryStopped = false
         }
-        if (failure != null && (failure.startupFailure != null || failure.usbPairingFailure != null) && !reconnect) {
+        if (failure != null && (failure.startupFailure != null || failure.requiresManualRetry()) && !reconnect) {
             createStatusReporter(restartGeneration)(failure)
         } else if (failure?.wifiResetRequired == true && (!reconnect || useWirelessTransport)) {
             createStatusReporter(restartGeneration)(failure)
