@@ -56,6 +56,20 @@ class WirelessBootstrapProtocolTest {
         assertEquals(0x4301, fixture.sent.last().first)
     }
 
+    @Test fun startSessionGuardRunsBeforeWireWriteAndSuccessCallback() {
+        val fixture = Fixture()
+        val steps = mutableListOf<String>()
+        fixture.onControlRecv = {
+            if (fixture.controlRecvTimeouts.size == 1) Iap2Frame(0x4300, byteArrayOf()) else null
+        }
+        fixture.beforeStartSession = { steps += "guard" }
+        fixture.onSend = { frame -> if (frame.messageId == 0x4301) steps += "wire" }
+        fixture.onStartSessionSent = { steps += "sent" }
+
+        fixture.run(timeoutMillis = 60_000L, handshakeTimeoutMillis = 5_000L)
+        assertEquals(listOf("guard", "wire", "sent"), steps)
+    }
+
     @Test fun authenticationAndSubscriptionsConsumeOneSharedHandshakeBudget() {
         val fixture = Fixture()
         fixture.onAuthentication = { Thread.sleep(40L) }
@@ -173,6 +187,9 @@ class WirelessBootstrapProtocolTest {
         val sent = mutableListOf<Pair<Int, Long>>()
         var onControlRecv: (Long) -> Iap2Frame? = { null }
         var onAuthentication: () -> Unit = {}
+        var beforeStartSession: () -> Unit = {}
+        var onStartSessionSent: () -> Unit = {}
+        var onSend: (Iap2Frame) -> Unit = {}
         private var identificationAccepted = false
 
         // Default answers avoid null-valued Mockito argument matchers for Kotlin non-null parameters.
@@ -197,6 +214,7 @@ class WirelessBootstrapProtocolTest {
                 "send" -> {
                     val frame = invocation.getArgument<Iap2Frame>(0)
                     sent += frame.messageId to invocation.getArgument<Long>(1)
+                    onSend(frame)
                     null
                 }
                 "isClosed" -> closed
@@ -231,6 +249,8 @@ class WirelessBootstrapProtocolTest {
                 timeoutMillis = timeoutMillis,
                 handshakeTimeoutMillis = handshakeTimeoutMillis,
                 onReady = { readyCalls++ },
+                beforeStartSession = beforeStartSession,
+                onStartSessionSent = { onStartSessionSent() },
                 onBootstrapPhase = { phases += it },
             )
     }

@@ -516,6 +516,37 @@ class WirelessBootstrapRecoveryTest {
         assertFalse(Attempt({ false }, 2).timeout(stall()))
     }
 
+    @Test fun watchdogTimeoutCannotReplaceTerminalFailuresOrInterruptions() {
+        val failures: List<Exception> = listOf(
+            SecurityException("Bluetooth permission revoked"),
+            IOException("wrapped permission failure", SecurityException("Bluetooth permission revoked")),
+            Iap2IdentificationException.Rejected(setOf(1, 2)),
+            IOException("wrapped protocol rejection", Iap2IdentificationException.Rejected(setOf(1, 2))),
+            Iap2MfiAuthenticationException("iPhone sent AuthenticationFailed"),
+            IOException("wrapped MFi refusal", Iap2MfiAuthenticationException("iPhone sent AuthenticationFailed")),
+            MfiAuthenticationFailedException(1),
+            InterruptedIOException("owner closed the connection"),
+            IllegalStateException("invalid transport state"),
+        )
+        for (failure in failures) {
+            val attempt = Attempt({ true }, 1).apply { stage = Stage.BOOTSTRAP }
+            assertTrue(attempt.timeout(stall()))
+            assertSame("Watchdog must preserve terminal ${failure.javaClass.simpleName}",
+                failure, attempt.failure(failure))
+            assertFalse("Terminal ${failure.javaClass.simpleName} must not retry", WirelessBootstrapRecovery.retryable(failure))
+        }
+    }
+
+    @Test fun watchdogCancellationStillMapsToTypedLocalRecovery() {
+        val attempt = Attempt({ true }, 1).apply { stage = Stage.BOOTSTRAP }
+        assertTrue(attempt.timeout(stall()))
+        val channelClosed = CancellationException("watchdog closed stale channel")
+        val failure = attempt.failure(channelClosed) as WirelessBootstrapRecovery.BootstrapFailure
+        assertEquals(ConnectionFailureCause.WIRELESS_PHONE_NOT_RESPONDING, failure.reason)
+        assertSame(channelClosed, failure.suppressed.single())
+        assertTrue(WirelessBootstrapRecovery.retryable(failure))
+    }
+
     @Test fun watchdogTimeoutCannotReplaceAFatalError() {
         val attempt = Attempt({ true }, 1)
         assertTrue(attempt.timeout(stall()))

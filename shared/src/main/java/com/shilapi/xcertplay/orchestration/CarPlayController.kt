@@ -1769,13 +1769,13 @@ class CarPlayController(
                                 "elapsedMs=${elapsedMillis(stageStarted)}")
                         },
                         transportWaitMillis = WIRELESS_TRANSPORT_WAIT_MILLIS,
-                        beforeStartSession = { attempt.checkCurrent(); validateInfrastructure() },
+                        beforeStartSession = {
+                            // The phone may receive 0x4301 even if the write later fails. Stop
+                            // local retries before writing any of that frame, not after it succeeds.
+                            beginStartSessionDispatch(generation, attempt, startSessionSent, ::validateInfrastructure)
+                        },
                         onStartSessionSent = {
-                            if (attempt.isCurrent) {
-                                attempt.stage = WirelessBootstrapRecovery.Stage.CONTROL
-                                startSessionSent.set(true)
-                                watchdog.startSessionSent(it.sentAtNanos)
-                            }
+                            if (attempt.isCurrent) watchdog.startSessionSent(it.sentAtNanos)
                         },
                         onBootstrapPhase = { reached ->
                             if (attempt.isCurrent) bootstrap.mark(reached)
@@ -2156,6 +2156,28 @@ class CarPlayController(
         }
     }
 
+
+    /**
+     * Point of no return for local recovery: an incomplete 0x4301 write can still
+     * reach the iPhone. Claim it under the same owner lock as the timeout callback,
+     * and disarm the bootstrap watchdog before the first byte is sent.
+     */
+    private fun beginStartSessionDispatch(
+        generation: Int,
+        attempt: WirelessBootstrapRecovery.Attempt,
+        startSessionDispatched: AtomicBoolean,
+        validateInfrastructure: () -> Unit,
+    ) = synchronized(wirelessResourceLock) {
+        attempt.checkCurrent()
+        validateInfrastructure()
+        attempt.checkCurrent()
+        if (isStaleWirelessRun(generation) || bootstrapAttempt !== attempt) {
+            throw java.util.concurrent.CancellationException("Stale bootstrap before StartSession dispatch")
+        }
+        attempt.stage = WirelessBootstrapRecovery.Stage.CONTROL
+        startSessionDispatched.set(true)
+        bootstrapWatchdog?.mark(Iap2BootstrapPhase.START_SESSION_SENT)
+    }
 
     private fun expireBootstrapAttempt(
         generation: Int,

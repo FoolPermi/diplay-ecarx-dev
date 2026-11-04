@@ -44,6 +44,12 @@ internal class WirelessBootstrapRecovery(
         fun failure(error: Throwable): Throwable {
             if (error is Error) return error
             stall?.let {
+                // Closing a timed-out channel can surface as EOF/cancellation, but a real
+                // permission, protocol or authentication rejection must remain terminal.
+                // Inspect the original error before hiding it in suppressed exceptions.
+                if (error is BootstrapFailure) return error
+                if (requiresUserAction(error) ||
+                    (error !is CancellationException && !retryable(error))) return error
                 return BootstrapFailure(it.cause, it.message()).apply { addSuppressed(error) }
             }
             if (error !is BootstrapFailure && (stage == Stage.CSM || stage == Stage.BOOTSTRAP) && retryable(error)) {

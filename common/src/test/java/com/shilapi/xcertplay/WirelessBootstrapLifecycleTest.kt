@@ -339,6 +339,43 @@ class WirelessBootstrapLifecycleTest {
         verifyNoInteractions(channel)
     }
 
+    @Test fun startSessionDispatchGuardsAgainstTimeoutBeforeSendCallback() {
+        setWirelessPhase()
+        val attempt = newAttempt()
+        val stream = mock(BluetoothRfcommDuplexStream::class.java)
+        val dispatched = AtomicBoolean(false)
+        ReflectionHelpers.setField(controller, "bootstrapAttempt", attempt)
+        ReflectionHelpers.setField(controller, "bluetoothStream", stream)
+
+        // This hook runs before 0x4301 is written; onStartSessionSent has not run yet.
+        controller.javaClass.getDeclaredMethod("beginStartSessionDispatch",
+            Int::class.javaPrimitiveType, attempt.javaClass, AtomicBoolean::class.java,
+            Function0::class.java).apply { isAccessible = true }
+            .invoke(controller, 0, attempt, dispatched, { Unit })
+        assertTrue(dispatched.get())
+        assertTrue(attemptIsCurrent(attempt))
+
+        expireAttempt(attempt, dispatched = dispatched)
+        assertSame(attempt, ReflectionHelpers.getField(controller, "bootstrapAttempt"))
+        assertTrue(attemptIsCurrent(attempt))
+        verifyNoInteractions(stream)
+    }
+
+    @Test fun staleAttemptCannotBeginStartSessionDispatch() {
+        setWirelessPhase()
+        val old = newAttempt()
+        ReflectionHelpers.setField(controller, "bootstrapAttempt", newAttempt())
+        val dispatched = AtomicBoolean(false)
+        val error = assertThrows(InvocationTargetException::class.java) {
+            controller.javaClass.getDeclaredMethod("beginStartSessionDispatch",
+                Int::class.javaPrimitiveType, old.javaClass, AtomicBoolean::class.java,
+                Function0::class.java).apply { isAccessible = true }
+                .invoke(controller, 0, old, dispatched, { Unit })
+        }
+        assertTrue(error.cause is CancellationException)
+        assertFalse(dispatched.get())
+    }
+
     @Test fun watchdogCannotCloseAfterStartSessionOrHandoffOrGenerationReplacement() {
         setWirelessPhase()
         val attempt = newAttempt()
@@ -363,7 +400,8 @@ class WirelessBootstrapLifecycleTest {
         })
     }
 
-    private fun expireAttempt(attempt: Any, sent: Boolean = false) {
+    private fun expireAttempt(attempt: Any, sent: Boolean = false,
+        dispatched: AtomicBoolean = AtomicBoolean(sent)) {
         val phaseType = com.shilapi.xcertplay.transport.Iap2BootstrapPhase::class.java
         val stallType = Class.forName("com.shilapi.xcertplay.orchestration.Iap2BootstrapStall")
         val stall = stallType.getDeclaredConstructor(phaseType, phaseType, Long::class.javaPrimitiveType)
@@ -371,7 +409,7 @@ class WirelessBootstrapLifecycleTest {
                 com.shilapi.xcertplay.transport.Iap2BootstrapPhase.WIRELESS_CARPLAY_AVAILABLE, 65_000L)
         controller.javaClass.getDeclaredMethod("expireBootstrapAttempt", Int::class.javaPrimitiveType,
             attempt.javaClass, stallType, AtomicBoolean::class.java).apply { isAccessible = true }
-            .invoke(controller, 0, attempt, stall, AtomicBoolean(sent))
+            .invoke(controller, 0, attempt, stall, dispatched)
     }
 
     private fun reportedFailure(error: Throwable): CarPlayStatus.Failed {
