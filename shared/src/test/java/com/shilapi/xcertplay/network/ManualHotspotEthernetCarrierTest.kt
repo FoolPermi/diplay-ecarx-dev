@@ -76,8 +76,9 @@ class ManualHotspotEthernetCarrierTest {
     }
 
     @Test fun linkLocalOnlyInterfaceStillSelectsAnIpv6Endpoint() {
-        // Documents the remaining limit: a VLAN with only fe80:: is accepted, but the iPhone then
-        // has no IPv4 endpoint to reach. Reported, not silently treated as a working hotspot.
+        // The platform-owned/explicitly configured path keeps IPv6 support: an interface named as
+        // the hotspot that carries only fe80:: still yields an IPv6 endpoint rather than being
+        // dropped. (Automatic inference rejects it; see the tests below.)
         val selected = select(snapshot(iface("eth0.3", addresses = listOf(ipv6)), ap = setOf("eth0.3")))
         assertEquals("eth0.3", selected?.name)
         assertTrue(selected!!.address is Inet6Address)
@@ -86,5 +87,52 @@ class ManualHotspotEthernetCarrierTest {
     @Test fun globalAddressThatIsNotPrivateIsStillAValidHotspotAddress() {
         // 198.18.34.15 is what the reference unit published; a private-range filter would drop it.
         assertTrue(publishesHotspotAddress(globals))
+        assertTrue(publishesHotspotIpv4(globals))
+    }
+
+    @Test fun inferenceRequiresAPublishableIpv4Address() {
+        // A bare link-local IPv6 is not hotspot-ownership evidence for an inferred wired interface.
+        assertFalse(publishesHotspotIpv4(ipv6))
+        assertTrue(publishesHotspotIpv4(ipv4))
+        assertFalse(publishesHotspotIpv4(InetAddress.getByName("169.254.1.1")))
+        assertFalse(publishesHotspotIpv4(InetAddress.getByName("127.0.0.1")))
+        assertFalse(publishesHotspotIpv4(InetAddress.getByName("0.0.0.0")))
+    }
+
+    private fun infer(vararg interfaces: HotspotInterfaceSnapshot) = inferHotspotCarrierCandidates(
+        interfaces.toList(),
+        upstreams = emptySet(),
+        defaultInterface = null,
+        excludedInterfaces = ManualHotspotInterfaces.EXCLUDED_INTERFACES,
+        preferredInterface = ManualHotspotInterfaces.DEFAULT_CAR_HOTSPOT_INTERFACE,
+    )
+
+    @Test fun internalEthernetInterfaceWithOnlyLinkLocalAddressIsNotInferred() {
+        // eth0/tam0 commonly hold only fe80:: on a car head unit; that must not nominate them.
+        assertTrue(infer(iface("eth0", addresses = listOf(ipv6))).isEmpty())
+        assertTrue(infer(iface("tam0", addresses = listOf(ipv6))).isEmpty())
+    }
+
+    @Test fun inferredCarrierWithIpv4IsStillAccepted() {
+        // The vendor VLAN case keeps working: an IPv4-bearing non-wireless interface is inferred.
+        assertEquals(setOf("eth0.3"), infer(iface("eth0.3", addresses = listOf(ipv4, ipv6))))
+        assertEquals(setOf("br0"), infer(iface("br0", addresses = listOf(ipv4))))
+    }
+
+    @Test fun inferenceIgnoresLinkLocalAlongsideIpv4OnUnnamedInterfaces() {
+        // Mixed eth0 (fe80:: only) and eth0.3 (IPv4) must infer only eth0.3, never eth0.
+        val inferred = infer(
+            iface("eth0", addresses = listOf(ipv6)),
+            iface("eth0.3", addresses = listOf(ipv4, ipv6)),
+        )
+        assertEquals(setOf("eth0.3"), inferred)
+    }
+
+    @Test fun inferencePrefersTheReferenceInterfaceWhenSeveralSayIpv4() {
+        val inferred = infer(
+            iface("eth0.3", addresses = listOf(ipv4)),
+            iface("br0", addresses = listOf(ipv4)),
+        )
+        assertEquals(setOf("eth0.3"), inferred)
     }
 }

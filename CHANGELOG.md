@@ -17,6 +17,11 @@
 - 关闭 JmDNS 期间不再持有全局资源锁。实车日志中单次 `teardown resource=Bonjour` 曾达到 22 秒、多次 4~5 秒，期间整个无线 teardown 与下一次重连都被阻塞；现在资源锁只覆盖瞬时操作。
 - AirPlay 服务解绑提到 Bonjour 之前，先停止广播与接收连接，不用排在可能阻塞的 JmDNS 关闭之后。
 - 异步清理只关闭关闭时捕获的旧 generation 实例，新会话使用自己的 `CarPlayBonjour`，旧 generation 的迟到清理不会影响新会话。
+## 网卡识别：不再把只有 link-local IPv6 的以太网口误判为热点
+
+- 自动推断热点承载接口（`hotspotCarrierCandidates`）时，非无线的有线/VLAN 接口现在必须发布可用的 IPv4 地址才进入候选，纯 `fe80::` 不再作为热点归属证据，修复 `eth0`/`tam0` 等内部网卡被误判为热点的问题。
+- 平台明确报告的 tethered 接口与显式配置的接口仍保留原有 IPv6 兼容策略，仍可承载 IPv6 热点；本次未全局禁用 IPv6。
+
 ## iAP2 握手进度看门狗（无线 CarPlay）
 
 - 无线 CarPlay 的蓝牙握手新增独立的进度看门狗，按阶段分别计时，不再只靠 AirPlay TCP 的 `FirstTcpWatchdog` 或一个统一的控制环超时：
