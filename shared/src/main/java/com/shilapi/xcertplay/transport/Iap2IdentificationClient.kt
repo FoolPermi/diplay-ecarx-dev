@@ -190,7 +190,10 @@ class Iap2IdentificationClient(private val session: Iap2Session) {
         config: Iap2IdentificationConfig,
         timeoutMillis: Long = DEFAULT_TIMEOUT_MILLIS,
         onProgress: (String) -> Unit = {},
-    ) = exchange(session::awaitReady, session::recv, session::send, config, timeoutMillis, onProgress)
+        // Called once the link has negotiated the writable iAP2 control session, before the
+        // identification frames are exchanged. Lets a caller time the CSM stage apart from MFi.
+        onLinkReady: () -> Unit = {},
+    ) = exchange(session::awaitReady, session::recv, session::send, config, timeoutMillis, onProgress, onLinkReady)
 
     companion object {
         /** The identification exchange over any message link; [identify] runs it on the session. */
@@ -201,6 +204,7 @@ class Iap2IdentificationClient(private val session: Iap2Session) {
             config: Iap2IdentificationConfig,
             timeoutMillis: Long,
             onProgress: (String) -> Unit,
+            onLinkReady: () -> Unit = {},
         ) {
             require(timeoutMillis in 1..MAXIMUM_TIMEOUT_MILLIS) {
                 "timeoutMillis must be in 1..$MAXIMUM_TIMEOUT_MILLIS"
@@ -209,6 +213,7 @@ class Iap2IdentificationClient(private val session: Iap2Session) {
             if (!awaitReady(remainingMillis(deadlineNanos))) {
                 throw IphoneUsbException.TimedOut("Timed out waiting for iAP2 control session readiness")
             }
+            onLinkReady()
 
             var omitted: Set<Int>? = null
             while (true) {

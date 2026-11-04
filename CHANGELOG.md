@@ -6,6 +6,16 @@
 
 使用手册正文已跟进到本段实现；页面截图仍是 v106 实车画面，各节标注了后续版本的实测状态。
 
+## iAP2 握手进度看门狗（无线 CarPlay）
+
+- 无线 CarPlay 的蓝牙握手新增独立的进度看门狗，按阶段分别计时，不再只靠 AirPlay TCP 的 `FirstTcpWatchdog` 或一个统一的控制环超时：
+  - RFCOMM 已连接 → CSM 已建立（15 s）：等了 CSM 仍没起来，判定为「蓝牙链路故障」。
+  - CSM 已建立 → MFi 认证完成（30 s）：链路通了但手机不应答识别/MFi，判定为「手机未响应」。
+  - MFi 认证完成 → WirelessCarPlayAvailable／TransportIdentifier／StartSession（65 s，为 60 s 传输等待之上的兜底；部分进度后 45 s）：认证完成却不再推进，判定为手机停在握手中。
+  - StartSession 已发送之后交给 `FirstTcpWatchdog` 与无线交接看门狗；Tunnel 建立是本看门狗的终止点，不再重复计时，避免与既有超时互相打断。
+- 新增四种失败原因并给出各自的处置建议：蓝牙链路故障（`WIRELESS_BLUETOOTH_LINK_FAILED`）、手机未响应（`WIRELESS_PHONE_NOT_RESPONDING`）、MFi 认证失败（`WIRELESS_AUTHENTICATION_FAILED`）、无线隧道未建立（`WIRELESS_TUNNEL_NOT_STARTED`）。此前这些情况要么一直停在「正在连接」，要么只能等到五分钟总超时。
+- 计时预算按实车日志校准：RFCOMM 连接约 1–2 s，CSM＋识别＋MFi 均在 0.5 s 内，各阶段预算都远大于实测值，只在手机真正卡住时触发。
+- 每个阶段都会输出 `bootstrap phase=… sincePreviousMs=…` 进度日志，失败时输出 `bootstrap stall reached=… missing=… waitedMs=…`，方便区分是蓝牙、手机还是认证的问题。
 ## 冷启动画布尺寸立即应用
 
 - 首次取得有效显示尺寸时立即应用，不再等待 500ms 防抖，减少冷启动时 CarPlay 建栈前的固定等待。

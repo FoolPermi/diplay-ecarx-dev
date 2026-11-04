@@ -12,6 +12,19 @@ enum class ConnectionFailureCause {
 
     /** Bluetooth iAP2 authenticated, but the iPhone never asked for the Wi-Fi transport. */
     WIRELESS_TRANSPORT_NOT_STARTED,
+
+    /** The RFCOMM link connected but the iPhone never opened an iAP2 control session (CSM). */
+    WIRELESS_BLUETOOTH_LINK_FAILED,
+
+    /** The iAP2 control session was up but the iPhone stopped answering identification/MFi or the
+     * transport exchange — a silent phone rather than a rejected handshake. */
+    WIRELESS_PHONE_NOT_RESPONDING,
+
+    /** The iPhone rejected or did not complete MFi authentication over the Bluetooth iAP2 link. */
+    WIRELESS_AUTHENTICATION_FAILED,
+
+    /** The iPhone authenticated over Bluetooth but the tunneled iAP2 channel never came up. */
+    WIRELESS_TUNNEL_NOT_STARTED,
 }
 
 /** Unlike a [com.shilapi.xcertplay.network.WirelessStartupException], it changes what the screen says, not the retries. */
