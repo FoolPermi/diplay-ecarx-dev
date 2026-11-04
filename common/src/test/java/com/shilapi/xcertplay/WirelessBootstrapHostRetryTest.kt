@@ -115,7 +115,9 @@ class WirelessBootstrapHostRetryTest {
         assertFalse(ReflectionHelpers.getField(activity, "reconnectScheduled"))
         assertEquals(0, ReflectionHelpers.getField<Int>(activity, "restartGeneration"))
         assertEquals(View.VISIBLE, retry.visibility)
-        assertTrue(stage.text.toString().contains("Bluetooth permission denied"))
+        assertTrue(ReflectionHelpers.getField<String>(activity, "latestStage").contains("Bluetooth permission denied"))
+        assertEquals(activity.getString(com.shilapi.xcertplay.host.R.string.allow_the_connection_permission_to_continue),
+            stage.text.toString())
     }
 
     @Test fun terminalFailureInMenuStopsAPreviouslyQueuedRetryImmediately() {
