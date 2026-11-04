@@ -446,6 +446,79 @@ class WirelessBootstrapRecoveryTest {
         assertFalse(WirelessBootstrapRecovery.retryable(IOException("wrapped fatal", fatal)))
     }
 
+    @Test fun watchdogTimeoutRetainsStageAndAllowsOneLocalRecovery() {
+        val fixture = Fixture()
+        fixture.run { _, attempt ->
+            attempt.stage = Stage.BOOTSTRAP
+            if (attempt.number == 1) {
+                assertTrue(attempt.timeout(stall()))
+                assertFalse(attempt.isCurrent)
+                val closed = CancellationException("watchdog closed old stream")
+                val failure = attempt.failure(closed) as WirelessBootstrapRecovery.BootstrapFailure
+                assertEquals(ConnectionFailureCause.WIRELESS_PHONE_NOT_RESPONDING, failure.reason)
+                assertSame(closed, failure.suppressed.single())
+                assertTrue(WirelessBootstrapRecovery.retryable(failure))
+                assertFalse(WirelessBootstrapRecovery.requiresUserAction(failure))
+                throw failure
+            }
+            assertFalse(fixture.attempts.first().isCurrent)
+        }
+        assertEquals(2, fixture.attempts.size)
+        assertEquals(800L, fixture.pauses.sum())
+        assertTrue(fixture.fallbackTargets.isEmpty())
+    }
+
+    @Test fun watchdogTimeoutBudgetIsNotResetByAReplacementAttempt() {
+        val fixture = Fixture()
+        val error = assertThrows(WirelessBootstrapRecovery.BootstrapFailure::class.java) {
+            fixture.run { _, attempt ->
+                attempt.stage = Stage.BOOTSTRAP
+                assertTrue(attempt.timeout(stall()))
+                throw attempt.failure(IOException("channel closed"))
+            }
+        }
+        assertEquals(ConnectionFailureCause.WIRELESS_PHONE_NOT_RESPONDING, error.reason)
+        assertEquals(2, fixture.attempts.size)
+        assertEquals(800L, fixture.pauses.sum())
+    }
+
+    @Test fun invalidatedOrStaleAttemptCannotAcceptALateWatchdogTimeout() {
+        val attempt = Attempt({ true }, 1)
+        attempt.invalidate()
+        assertFalse(attempt.timeout(stall()))
+        val original = IOException("original close")
+        assertSame(original, attempt.failure(original))
+        assertFalse(Attempt({ false }, 2).timeout(stall()))
+    }
+
+    @Test fun watchdogTimeoutCannotReplaceAFatalError() {
+        val attempt = Attempt({ true }, 1)
+        assertTrue(attempt.timeout(stall()))
+        val fatal = AssertionError("fatal transport failure")
+        assertSame(fatal, attempt.failure(fatal))
+    }
+
+    @Test fun protocolTimeoutsKeepTypedUpstreamCausesWithoutRetryingExplicitRejection() {
+        for (stage in listOf(Stage.CSM, Stage.BOOTSTRAP)) {
+            val attempt = Attempt({ true }, 1).apply { this.stage = stage }
+            val original = if (stage == Stage.CSM) IOException("CSM ready timed out") else
+                Iap2MfiAuthenticationException("MFi timeout", retryable = true)
+            val failure = attempt.failure(original) as WirelessBootstrapRecovery.BootstrapFailure
+            assertEquals(if (stage == Stage.CSM) ConnectionFailureCause.WIRELESS_BLUETOOTH_LINK_FAILED else
+                ConnectionFailureCause.WIRELESS_PHONE_NOT_RESPONDING, failure.reason)
+            assertSame(original, failure.cause)
+            assertTrue(WirelessBootstrapRecovery.retryable(failure))
+            val rejected = Iap2MfiAuthenticationException("AuthenticationFailed")
+            assertSame(rejected, attempt.failure(rejected))
+        }
+    }
+
+    private fun stall() = Iap2BootstrapStall(
+        com.shilapi.xcertplay.transport.Iap2BootstrapPhase.MFi_AUTHENTICATED,
+        com.shilapi.xcertplay.transport.Iap2BootstrapPhase.WIRELESS_CARPLAY_AVAILABLE,
+        65_000L,
+    )
+
     private fun assertNoRecovery(failure: Exception, stage: Stage = Stage.CONNECT) {
         val fixture = Fixture()
         if (stage != Stage.CONTROL) {

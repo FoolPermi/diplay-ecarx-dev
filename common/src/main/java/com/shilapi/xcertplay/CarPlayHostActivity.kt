@@ -5770,10 +5770,17 @@ open class CarPlayHostActivity : ComponentActivity() {
             return
         }
         pendingDisplaySize = size
-        // With a turning screen's square canvas nothing reconnects, so the turn need not wait for the size to settle.
         mainHandler.postDelayed(applyDisplaySize,
-            if (sessionDisplay?.viewAreas?.turnsWithScreen == true) 0L else DISPLAY_CHANGE_DEBOUNCE_MILLIS)
+            if (displaySizeChangeIsImmediate()) 0L else DISPLAY_CHANGE_DEBOUNCE_MILLIS)
     }
+
+    /**
+     * The first valid size is the cold-start canvas: apply it at once instead of waiting for the
+     * window to settle, so startup does not pay the debounce. A turning screen's square canvas also
+     * need not wait, because nothing reconnects when the turn changes it.
+     */
+    private fun displaySizeChangeIsImmediate(): Boolean =
+        activeDisplaySize == null || sessionDisplay?.viewAreas?.turnsWithScreen == true
 
     private fun isMultiWindowActive(): Boolean {
         return Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInMultiWindowMode

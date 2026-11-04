@@ -22,9 +22,15 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.Implementation
 import org.robolectric.annotation.Implements
 import org.robolectric.annotation.LooperMode
+import org.mockito.Mockito.doAnswer
+import org.mockito.Mockito.mock
+import org.mockito.Mockito.verify
+import org.mockito.Mockito.verifyNoInteractions
 import org.robolectric.util.ReflectionHelpers
 import java.io.IOException
 import java.lang.reflect.InvocationTargetException
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 @RunWith(RobolectricTestRunner::class)
@@ -128,6 +134,46 @@ class WirelessStartupControllerTest {
             shadowOf(Looper.getMainLooper()).idle()
             assertTrue(statuses.isEmpty())
         } finally { controller.close(); controller.awaitClosed(2_000) }
+    }
+
+    @Test fun aSlowBonjourTeardownRunsOffTheResourceLockAndLeavesANewSessionAlone() {
+        val controller = controller()
+        val oldBonjour = mock(CarPlayBonjour::class.java)
+        val closing = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        doAnswer {
+            closing.countDown()
+            release.await(5, TimeUnit.SECONDS)
+            null
+        }.`when`(oldBonjour).close()
+        try {
+            ReflectionHelpers.setField(controller, "bonjour", oldBonjour)
+            val closeReturned = CountDownLatch(1)
+            Thread({
+                controller.javaClass.getDeclaredMethod(
+                    "closeWirelessStack", CarPlayVpnService::class.java, Int::class.javaObjectType,
+                ).apply { isAccessible = true }.invoke(controller, null, 0)
+                closeReturned.countDown()
+            }, "close-wireless-stack-test").apply { isDaemon = true; start() }
+            assertTrue("the Bonjour close should have started", closing.await(2, TimeUnit.SECONDS))
+            assertTrue(
+                "closeWirelessStack must not wait for a slow Bonjour close",
+                closeReturned.await(1, TimeUnit.SECONDS),
+            )
+            // The controller drops the stale instance synchronously, before a new session can adopt one.
+            assertNull(ReflectionHelpers.getField<Any?>(controller, "bonjour"))
+            val newBonjour = mock(CarPlayBonjour::class.java)
+            ReflectionHelpers.setField(controller, "bonjour", newBonjour)
+            release.countDown()
+            Thread.sleep(100)
+            verify(oldBonjour).close()
+            verifyNoInteractions(newBonjour)
+            assertSame(newBonjour, ReflectionHelpers.getField<Any?>(controller, "bonjour"))
+        } finally {
+            release.countDown()
+            controller.close()
+            controller.awaitClosed(2_000)
+        }
     }
 
     @Test fun aKnownCauseInTheChainIsNamedWithoutBecomingAStartupFailure() {

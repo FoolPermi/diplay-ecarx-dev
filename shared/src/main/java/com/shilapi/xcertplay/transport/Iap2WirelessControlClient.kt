@@ -42,6 +42,9 @@ class Iap2WirelessControlClient(
         // Null preserves the existing tunnel caller contract.
         handshakeTimeoutMillis: Long? = null,
         onProgress: (String) -> Unit = {},
+        // Structured progress checkpoints for the bootstrap watchdog. The runtime tunnel loop,
+        // which starts after the transport already exists, leaves this at the default.
+        onBootstrapPhase: (Iap2BootstrapPhase) -> Unit = {},
     ): Iap2WirelessControlResult {
         require(identification.wireless != null) {
             "Wireless control requires an Iap2IdentificationConfig with wireless transport"
@@ -61,11 +64,17 @@ class Iap2WirelessControlClient(
         if (identified.vehicleStatusEnabled != identification.vehicleStatusEnabled) {
             onProgress("iap2 no battery reading: not declaring an electric vehicle")
         }
-        Iap2IdentificationClient(session).identify(identified, handshakeRemaining(), onProgress)
+        Iap2IdentificationClient(session).identify(
+            identified,
+            handshakeRemaining(),
+            onProgress,
+            onLinkReady = { onBootstrapPhase(Iap2BootstrapPhase.CSM_ESTABLISHED) },
+        )
         onProgress("iap2 identification accepted")
         var stage = Iap2WirelessControlStage.IDENTIFIED
 
         mfi.run(session, handshakeRemaining(), onProgress)
+        onBootstrapPhase(Iap2BootstrapPhase.MFi_AUTHENTICATED)
         stage = Iap2WirelessControlStage.AUTHENTICATED
         onProgress("iap2 authentication accepted")
 
@@ -215,18 +224,22 @@ class Iap2WirelessControlClient(
                         stage = later(stage, Iap2WirelessControlStage.CARPLAY_START_SENT)
                         carPlayStartSessionsSent++
                         onProgress("iap2 tx=0x4301 carplay-start-session")
+                        onBootstrapPhase(Iap2BootstrapPhase.START_SESSION_SENT)
                     }
 
                     WIRELESS_CARPLAY_UPDATE -> {
                         val available = Iap2WirelessMessages.wirelessCarPlayAvailability(incoming)
                         if (available) wirelessCarPlayAvailableSeen = true else wirelessUnavailableReported = true
                         onProgress("iap2 rx=0x4e0d wireless-carplay-update available=$available")
+                        // Only the positive availability is bootstrap progress; "unavailable" is an answer.
+                        if (available) onBootstrapPhase(Iap2BootstrapPhase.WIRELESS_CARPLAY_AVAILABLE)
                     }
 
                     DEVICE_TRANSPORT_IDENTIFIER_NOTIFICATION -> {
                         transportNotificationSeen = true
                         val identifiers = Iap2WirelessMessages.deviceTransportIdentifier(incoming)
                         stage = later(stage, Iap2WirelessControlStage.TRANSPORT_NOTIFIED)
+                        onBootstrapPhase(Iap2BootstrapPhase.TRANSPORT_IDENTIFIED)
                         onProgress(
                             "iap2 rx=0x4e0e device-transport-identifier " +
                                 "bluetooth=${identifiers.bluetoothMac ?: "none"} " +

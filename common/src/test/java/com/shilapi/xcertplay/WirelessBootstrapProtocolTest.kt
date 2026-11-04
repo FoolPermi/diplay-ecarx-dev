@@ -5,6 +5,7 @@ import com.shilapi.xcertplay.iap2.wire.Iap2Frame
 import com.shilapi.xcertplay.iap2.wire.Iap2Parameter
 import com.shilapi.xcertplay.iap2.wire.Iap2ParameterList
 import com.shilapi.xcertplay.mfi.Iap2MfiAuthenticationClient
+import com.shilapi.xcertplay.transport.Iap2BootstrapPhase
 import com.shilapi.xcertplay.transport.Iap2IdentificationConfig
 import com.shilapi.xcertplay.transport.Iap2WiredControlClient
 import com.shilapi.xcertplay.transport.Iap2WirelessCarPlayEndpoint
@@ -35,6 +36,24 @@ class WirelessBootstrapProtocolTest {
         assertEquals(Iap2WiredControlClient.subscriptions().map { it.messageId }, fixture.sent.map { it.first })
         assertEquals(5, fixture.sent.size)
         assertEquals(1, fixture.readyCalls)
+        assertEquals(listOf(Iap2BootstrapPhase.CSM_ESTABLISHED, Iap2BootstrapPhase.MFi_AUTHENTICATED), fixture.phases)
+    }
+
+    @Test fun structuredProgressIsPreservedThroughTransportAndSuccessfulStartSession() {
+        val fixture = Fixture()
+        fixture.onControlRecv = {
+            when (fixture.controlRecvTimeouts.size) {
+                1 -> Iap2Frame(0x4e0d, Iap2ParameterList.of(Iap2Parameter(0, byteArrayOf(1))).encode())
+                2 -> Iap2Frame(0x4e0e, byteArrayOf())
+                3 -> Iap2Frame(0x4300, byteArrayOf())
+                else -> null
+            }
+        }
+        fixture.run(timeoutMillis = 60_000L, handshakeTimeoutMillis = 5_000L)
+        assertEquals(listOf(Iap2BootstrapPhase.CSM_ESTABLISHED, Iap2BootstrapPhase.MFi_AUTHENTICATED,
+            Iap2BootstrapPhase.WIRELESS_CARPLAY_AVAILABLE, Iap2BootstrapPhase.TRANSPORT_IDENTIFIED,
+            Iap2BootstrapPhase.START_SESSION_SENT), fixture.phases)
+        assertEquals(0x4301, fixture.sent.last().first)
     }
 
     @Test fun authenticationAndSubscriptionsConsumeOneSharedHandshakeBudget() {
@@ -146,6 +165,7 @@ class WirelessBootstrapProtocolTest {
     private class Fixture {
         var closed = true
         var readyCalls = 0
+        val phases = mutableListOf<Iap2BootstrapPhase>()
         val readyTimeouts = mutableListOf<Long>()
         val identificationRecvTimeouts = mutableListOf<Long>()
         val authenticationTimeouts = mutableListOf<Long>()
@@ -211,6 +231,7 @@ class WirelessBootstrapProtocolTest {
                 timeoutMillis = timeoutMillis,
                 handshakeTimeoutMillis = handshakeTimeoutMillis,
                 onReady = { readyCalls++ },
+                onBootstrapPhase = { phases += it },
             )
     }
 }

@@ -296,6 +296,84 @@ class WirelessBootstrapLifecycleTest {
             Iap2MfiAuthenticationException("iPhone sent AuthenticationFailed"))).automaticRetryAllowed)
     }
 
+    @Test fun watchdogTimeoutClosesOnlyItsAttemptAndPreservesTypedRetryCause() {
+        setWirelessPhase()
+        val attempt = newAttempt()
+        val channel = mock(Iap2Session::class.java)
+        val stream = mock(BluetoothRfcommDuplexStream::class.java)
+        val hotspot = mock(WirelessHotspotManager::class.java)
+        val bonjour = mock(CarPlayBonjour::class.java)
+        val service = mock(CarPlayVpnService::class.java)
+        ReflectionHelpers.setField(controller, "bootstrapAttempt", attempt)
+        ReflectionHelpers.setField(controller, "csm", channel)
+        ReflectionHelpers.setField(controller, "bluetoothStream", stream)
+        ReflectionHelpers.setField(controller, "hotspot", hotspot)
+        ReflectionHelpers.setField(controller, "bonjour", bonjour)
+        ReflectionHelpers.setField(controller, "vpnService", service)
+        expireAttempt(attempt)
+        assertFalse(attemptIsCurrent(attempt))
+        assertNull(ReflectionHelpers.getField<Any?>(controller, "bootstrapAttempt"))
+        verify(channel).close()
+        verify(stream).close()
+        verifyNoInteractions(hotspot, bonjour, service)
+        shadowOf(Looper.getMainLooper()).idle()
+        assertTrue("A local timeout must not fail the entire wireless run", statuses.isEmpty())
+        val failure = attempt.javaClass.getDeclaredMethod("failure", Throwable::class.java)
+            .invoke(attempt, CancellationException("watchdog closed channel")) as ConnectionFailureException
+        assertEquals(ConnectionFailureCause.WIRELESS_PHONE_NOT_RESPONDING, failure.reason)
+        val reported = reportedFailure(failure)
+        assertEquals(failure.reason, reported.knownCause)
+        assertTrue(reported.automaticRetryAllowed)
+    }
+
+    @Test fun staleWatchdogCannotCloseAReplacementAttemptInTheSameWirelessRun() {
+        setWirelessPhase()
+        val old = newAttempt()
+        val replacement = newAttempt()
+        val channel = mock(Iap2Session::class.java)
+        ReflectionHelpers.setField(controller, "bootstrapAttempt", replacement)
+        ReflectionHelpers.setField(controller, "csm", channel)
+        expireAttempt(old)
+        assertSame(replacement, ReflectionHelpers.getField(controller, "bootstrapAttempt"))
+        assertTrue(attemptIsCurrent(replacement))
+        verifyNoInteractions(channel)
+    }
+
+    @Test fun watchdogCannotCloseAfterStartSessionOrHandoffOrGenerationReplacement() {
+        setWirelessPhase()
+        val attempt = newAttempt()
+        val channel = mock(Iap2Session::class.java)
+        ReflectionHelpers.setField(controller, "bootstrapAttempt", attempt)
+        ReflectionHelpers.setField(controller, "csm", channel)
+        expireAttempt(attempt, sent = true)
+        ReflectionHelpers.getField<AtomicBoolean>(controller, "wirelessHandoffRequested").set(true)
+        expireAttempt(attempt)
+        ReflectionHelpers.getField<AtomicBoolean>(controller, "wirelessHandoffRequested").set(false)
+        ReflectionHelpers.getField<AtomicInteger>(controller, "wirelessGeneration").set(1)
+        expireAttempt(attempt)
+        assertSame(attempt, ReflectionHelpers.getField(controller, "bootstrapAttempt"))
+        assertTrue(attemptIsCurrent(attempt))
+        verifyNoInteractions(channel)
+    }
+
+    private fun setWirelessPhase() {
+        val phase = ReflectionHelpers.getField<Any>(controller, "phase")
+        ReflectionHelpers.setField(controller, "phase", phase.javaClass.enumConstants.single {
+            (it as Enum<*>).name == "WIRELESS"
+        })
+    }
+
+    private fun expireAttempt(attempt: Any, sent: Boolean = false) {
+        val phaseType = com.shilapi.xcertplay.transport.Iap2BootstrapPhase::class.java
+        val stallType = Class.forName("com.shilapi.xcertplay.orchestration.Iap2BootstrapStall")
+        val stall = stallType.getDeclaredConstructor(phaseType, phaseType, Long::class.javaPrimitiveType)
+            .newInstance(com.shilapi.xcertplay.transport.Iap2BootstrapPhase.MFi_AUTHENTICATED,
+                com.shilapi.xcertplay.transport.Iap2BootstrapPhase.WIRELESS_CARPLAY_AVAILABLE, 65_000L)
+        controller.javaClass.getDeclaredMethod("expireBootstrapAttempt", Int::class.javaPrimitiveType,
+            attempt.javaClass, stallType, AtomicBoolean::class.java).apply { isAccessible = true }
+            .invoke(controller, 0, attempt, stall, AtomicBoolean(sent))
+    }
+
     private fun reportedFailure(error: Throwable): CarPlayStatus.Failed {
         controller.javaClass.getDeclaredMethod("fail", Throwable::class.java, Int::class.javaObjectType)
             .apply { isAccessible = true }.invoke(controller, error, 0)

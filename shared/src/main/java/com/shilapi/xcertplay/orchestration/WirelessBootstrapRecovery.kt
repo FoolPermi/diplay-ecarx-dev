@@ -18,14 +18,44 @@ internal class WirelessBootstrapRecovery(
 ) {
     enum class Stage { CONNECT, CSM, BOOTSTRAP, CONTROL }
 
+    /** A typed #38 cause that is still eligible for #36's bounded local recovery. */
+    class BootstrapFailure(reason: ConnectionFailureCause, message: String, cause: Throwable? = null) :
+        ConnectionFailureException(reason, message, cause)
+
     class Attempt(private val current: () -> Boolean, val number: Int) {
         @Volatile private var valid = true
+        @Volatile private var stall: Iap2BootstrapStall? = null
         var stage = Stage.CONNECT
         val isCurrent: Boolean get() = valid && current()
         fun checkCurrent() {
-            if (!isCurrent) throw CancellationException("Stale wireless bootstrap attempt")
+            if (!isCurrent) throw failure(CancellationException("Stale wireless bootstrap attempt"))
         }
-        fun invalidate() { valid = false }
+        @Synchronized fun invalidate() { valid = false }
+
+        /** Called under the controller's owner lock, before closing this attempt's transport. */
+        @Synchronized fun timeout(value: Iap2BootstrapStall): Boolean {
+            if (!isCurrent) return false
+            stall = value
+            valid = false
+            return true
+        }
+
+        /** Closing a timed-out channel often surfaces as cancellation/EOF; retain the real stage. */
+        fun failure(error: Throwable): Throwable {
+            if (error is Error) return error
+            stall?.let {
+                return BootstrapFailure(it.cause, it.message()).apply { addSuppressed(error) }
+            }
+            if (error !is BootstrapFailure && (stage == Stage.CSM || stage == Stage.BOOTSTRAP) && retryable(error)) {
+                return BootstrapFailure(
+                    if (stage == Stage.CSM) ConnectionFailureCause.WIRELESS_BLUETOOTH_LINK_FAILED
+                    else ConnectionFailureCause.WIRELESS_PHONE_NOT_RESPONDING,
+                    error.message ?: "Wireless iAP2 bootstrap failed at $stage",
+                    error,
+                )
+            }
+            return error
+        }
     }
 
     fun <T> run(
@@ -115,9 +145,10 @@ internal class WirelessBootstrapRecovery(
             if (causes.any { it is Error || it is SecurityException || it is IllegalArgumentException ||
                     it is IllegalStateException || it is InterruptedException || it is InterruptedIOException ||
                     it is CancellationException || it is WirelessStartupException ||
-                    it is ConnectionFailureException || it is Iap2IdentificationException }) return false
+                    it is ConnectionFailureException && it !is BootstrapFailure || it is Iap2IdentificationException }) return false
+            if (causes.any { it is MfiException && (it !is Iap2MfiAuthenticationException || !it.retryable) }) return false
+            // A silent/closed MFi transport is recoverable even though MfiException is not an IOException.
             if (error is Iap2MfiAuthenticationException) return error.retryable
-            if (causes.any { it is MfiException }) return false
             return error is IOException
         }
     }
