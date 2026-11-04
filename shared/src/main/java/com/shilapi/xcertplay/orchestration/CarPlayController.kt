@@ -43,7 +43,9 @@ import com.shilapi.xcertplay.mfi.Iap2MfiAuthenticationClient
 import com.shilapi.xcertplay.mfi.MfiAuthenticationClient
 import com.shilapi.xcertplay.mfi.RemoteMfiAuthenticationClient
 import com.shilapi.xcertplay.mfi.LocalMfiAuthenticationClient
+import com.shilapi.xcertplay.network.AddressFamilyFlipGate
 import com.shilapi.xcertplay.network.CarPlayBonjour
+import com.shilapi.xcertplay.network.CarPlayBonjourEvent
 import com.shilapi.xcertplay.network.diagnosticSummary
 import com.shilapi.xcertplay.network.CarPlayVpnService
 import com.shilapi.xcertplay.network.LocalOnlyHotspotManager
@@ -291,6 +293,9 @@ class CarPlayController(
     @Volatile private var wirelessPublishedAddress: InetAddress? = null
     @Volatile private var wirelessAlternateAddress: InetAddress? = null
     @Volatile private var wirelessAddressRecovery: HotspotAddressRecovery? = null
+    // Set once the iPhone answers on the current address family (Bonjour discovery, iAP2, or AirPlay).
+    // The first-TCP flip is only honest when the phone is actually associated and this family failed.
+    private val wirelessAddressFamilyReachable = AtomicBoolean(false)
     private val startupTimer = java.util.concurrent.ScheduledThreadPoolExecutor(1) { task ->
         Thread(task, "diplay-first-tcp-timeout").apply { isDaemon = true }
     }.apply { removeOnCancelPolicy = true }
@@ -1366,6 +1371,7 @@ class CarPlayController(
             wirelessTunnelReady.set(false)
             wirelessActiveReported.set(false)
             wirelessHandoffFellBack.set(false)
+            wirelessAddressFamilyReachable.set(false)
             bootstrapWatchdog?.terminate()
             bootstrapWatchdog = null
             val next = wirelessGeneration.incrementAndGet()
@@ -1415,7 +1421,16 @@ class CarPlayController(
                 },
                 onTimeout = {
                     if (!closed && generation == wirelessGeneration.get()) {
-                        flipWirelessAddressFamily(generation)
+                        if (shouldFlipAddressFamily(generation)) {
+                            flipWirelessAddressFamily(generation)
+                        } else {
+                            debugLog(
+                                "wireless first-TCP timeout kept address family: " +
+                                    "no evidence the iPhone is on the hotspot " +
+                                    "(association=${hotspot?.connectionDiagnosticSnapshot() ?: "unknown"} " +
+                                    "reachable=${wirelessAddressFamilyReachable.get()})",
+                            )
+                        }
                         fail(WirelessStartupException(WirelessStartupFailure.FIRST_TCP_TIMEOUT,
                             "No AirPlay TCP after CarPlay StartSession"), generation)
                         Thread({ closeWirelessStack(generation = generation) }, "diplay-startup-cleanup")
@@ -1580,7 +1595,14 @@ class CarPlayController(
                 // The car hotspot previously used system NSD, which could resolve another interface
                 // or IPv6 while the listener/probe was bound to the AP's IPv4 address.
                 useInterfaceMdns = true,
-                onEvent = { event -> debugLog("wireless bonjour: ${event.diagnosticSummary()}") },
+                onEvent = { event ->
+                    if (event is CarPlayBonjourEvent.Discovery || event is CarPlayBonjourEvent.Resolved) {
+                        // The iPhone showed up on this address family over mDNS; remember that the
+                        // family is usable so a later first-TCP timeout can be blamed on the family.
+                        wirelessAddressFamilyReachable.set(true)
+                    }
+                    debugLog("wireless bonjour: ${event.diagnosticSummary()}")
+                },
                 additionalAddresses = hotspotInfo.hostAddresses.filter { it != hostAddress },
             )
             synchronized(wirelessResourceLock) {
@@ -2035,6 +2057,8 @@ class CarPlayController(
         }
 
     private fun onWirelessTunnelReady(generation: Int) {
+        // The iPhone reached our address over this family, so a later verdict on it is valid.
+        wirelessAddressFamilyReachable.set(true)
         synchronized(wirelessResourceLock) {
             if (closed || phase != Phase.WIRELESS || generation != wirelessGeneration.get() ||
                 wirelessFailureReported.get()) return
@@ -2860,6 +2884,34 @@ class CarPlayController(
 
     private fun isStaleWirelessRun(generation: Int): Boolean =
         closed || phase != Phase.WIRELESS || generation != wirelessGeneration.get() || wirelessFailureReported.get()
+
+    /**
+     * True when there is real evidence that the current address family failed for a phone that is
+     * actually on the hotspot, so persisting the opposite family is a correction and not a guess.
+     *
+     * A first-TCP timeout on its own is ambiguous: the iPhone may simply still be away, in which
+     * case flipping the preferred family would poison the next, healthy connection. Require both an
+     * associated phone (a Bonjour `_airplay._tcp` announcement) and a reachable-address signal
+     * before persisting a flip.
+     */
+    private fun shouldFlipAddressFamily(generation: Int): Boolean {
+        if (isStaleWirelessRun(generation)) return false
+        val phoneOnHotspot = bonjourSawPhone()
+        val familyReachable = wirelessAddressFamilyReachable.get()
+        val reason = AddressFamilyFlipGate.withholdReason(phoneOnHotspot, familyReachable)
+        if (reason != null) {
+            debugLog("wireless address family flip withheld: $reason")
+            return false
+        }
+        return true
+    }
+
+    private fun bonjourSawPhone(): Boolean {
+        val snapshot = bonjour?.diagnosticSnapshot().orEmpty()
+        fun count(key: String): Int =
+            Regex("$key=(\\d+)").find(snapshot)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+        return count("bonjourAdded") > 0 || count("bonjourResolved") > 0
+    }
 
     // Kept across reconnects within this controller: resuming between attempts would start a scan.
     // close() sets [closed] under this lock, so a lease is either taken first and released by
