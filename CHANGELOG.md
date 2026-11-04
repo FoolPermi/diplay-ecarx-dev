@@ -32,6 +32,14 @@
 - 新增四种失败原因并给出各自的处置建议：蓝牙链路故障（`WIRELESS_BLUETOOTH_LINK_FAILED`）、手机未响应（`WIRELESS_PHONE_NOT_RESPONDING`）、MFi 认证失败（`WIRELESS_AUTHENTICATION_FAILED`）、无线隧道未建立（`WIRELESS_TUNNEL_NOT_STARTED`）。此前这些情况要么一直停在「正在连接」，要么只能等到五分钟总超时。
 - 计时预算按实车日志校准：RFCOMM 连接约 1–2 s，CSM＋识别＋MFi 均在 0.5 s 内，各阶段预算都远大于实测值，只在手机真正卡住时触发。
 - 每个阶段都会输出 `bootstrap phase=… sincePreviousMs=…` 进度日志，失败时输出 `bootstrap stall reached=… missing=… waitedMs=…`，方便区分是蓝牙、手机还是认证的问题。
+
+## 首次 TCP 超时不再盲翻地址族
+
+- `FIRST_TCP_TIMEOUT` 此前直接调用 `flipWirelessAddressFamily()` 持久化切换 IPv4/IPv6 偏好。当 iPhone 根本没接入热点（例如还在屋里、蓝牙/Wi-Fi 未就绪）时，这是把「没连上」误判成「地址族不对」，会污染下一次健康连接。
+- 现在只有同时满足两个条件才翻转：其一，本轮观察到 iPhone 的 Bonjour `_airplay._tcp` 通告，证明手机确实接入了热点并在应答 mDNS；其二，当前地址族已出现过可达信号（Bonjour 解析、iAP2 隧道建立或 AirPlay 会话），证明该地址族本身并非未检验。
+- 任一条件不满足时保留原偏好，仅记录 `wireless address family flip withheld: <reason>` 日志。判定逻辑抽为 `AddressFamilyFlipGate` 并附单元测试。
+- 每次 `startWireless` 重置本轮可达标记，避免上一轮证据泄漏到新一轮。
+
 ## 冷启动画布尺寸立即应用
 
 - 首次取得有效显示尺寸时立即应用，不再等待 500ms 防抖，减少冷启动时 CarPlay 建栈前的固定等待。
