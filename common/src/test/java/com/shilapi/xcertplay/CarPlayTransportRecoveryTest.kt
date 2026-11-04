@@ -40,6 +40,9 @@ class CarPlayTransportRecoveryTest {
         set("awaitingWiredPermissions", true)
         set("wirelessEnabled", true)
         AirPlayPersistence.saveWirelessEnabled(host, true)
+        // Legacy cases below assume USB insert is allowed to take over; the default-off policy is
+        // exercised by the dedicated tests at the end of this class.
+        AirPlayPersistence.saveUsbAutoTakeover(host, true)
         usb = mock(UsbDevice::class.java)
         `when`(usb.vendorId).thenReturn(1452)
         `when`(usb.deviceName).thenReturn("/dev/bus/usb/001/002")
@@ -169,5 +172,82 @@ class CarPlayTransportRecoveryTest {
         loop.idleFor(15_000, TimeUnit.MILLISECONDS)
         assertTrue(wireless())
         assertFalse(CarPlayBackgroundSession.usbTakeover)
+    }
+
+    // --- USB auto takeover policy (default off) ---
+
+    private fun configureWireless() {
+        AirPlayPersistence.saveWirelessEnabled(host, true)
+        DiPlayPreferences.savePhone(host, "00:11:22:33:44:55", "iPhone")
+        set("wirelessEnabled", true)
+    }
+
+    @Test fun defaultOffWithConfiguredWirelessKeepsWirelessOnAttach() {
+        AirPlayPersistence.saveUsbAutoTakeover(host, false)
+        configureWireless()
+
+        attached()
+
+        assertTrue(wireless())
+        assertFalse(CarPlayBackgroundSession.usbTakeover)
+    }
+
+    @Test fun defaultOffWithExplicitWiredStillTakesOver() {
+        AirPlayPersistence.saveUsbAutoTakeover(host, false)
+        configureWireless()
+        AirPlayPersistence.saveWirelessEnabled(host, false)
+        set("wirelessEnabled", false)
+
+        attached()
+
+        assertFalse(wireless())
+        assertTrue(CarPlayBackgroundSession.usbTakeover)
+    }
+
+    @Test fun defaultOffWithoutWirelessSetupAllowsUsb() {
+        AirPlayPersistence.saveUsbAutoTakeover(host, false)
+        AirPlayPersistence.saveWirelessEnabled(host, true)
+        set("wirelessEnabled", true)
+
+        attached()
+
+        assertTrue(CarPlayBackgroundSession.usbTakeover)
+        assertFalse(wireless())
+    }
+
+    @Test fun usbAutoTakeoverSwitchRestoresTakeoverForConfiguredWireless() {
+        AirPlayPersistence.saveUsbAutoTakeover(host, true)
+        configureWireless()
+
+        attached()
+
+        assertFalse(wireless())
+        assertTrue(CarPlayBackgroundSession.usbTakeover)
+    }
+
+    @Test fun defaultModeUsbAllowsTakeoverEvenWithWirelessPreference() {
+        AirPlayPersistence.saveUsbAutoTakeover(host, false)
+        configureWireless()
+        DiPlayPreferences.saveDefaultConnectionMode(host, DefaultConnectionMode.USB)
+
+        attached()
+
+        assertTrue(CarPlayBackgroundSession.usbTakeover)
+    }
+
+    @Test fun policyInputsAreReadFromPersistenceForColdStart() {
+        AirPlayPersistence.saveWirelessEnabled(host, true)
+        DiPlayPreferences.savePhone(host, "00:11:22:33:44:55", "iPhone")
+        DiPlayPreferences.saveDefaultConnectionMode(host, DefaultConnectionMode.LAST_USED)
+
+        AirPlayPersistence.saveUsbAutoTakeover(host, false)
+        assertFalse(call("shouldTakeOverUsb") as Boolean)
+
+        AirPlayPersistence.saveUsbAutoTakeover(host, true)
+        assertTrue(call("shouldTakeOverUsb") as Boolean)
+
+        AirPlayPersistence.saveUsbAutoTakeover(host, false)
+        AirPlayPersistence.saveWirelessEnabled(host, false)
+        assertTrue(call("shouldTakeOverUsb") as Boolean)
     }
 }

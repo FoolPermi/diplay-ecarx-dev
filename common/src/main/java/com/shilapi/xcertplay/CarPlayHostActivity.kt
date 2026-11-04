@@ -942,7 +942,16 @@ open class CarPlayHostActivity : ComponentActivity() {
         NavigationWidgetUpdater.attach(applicationContext)
         centerMap.attach()
         languagePreferenceAtCreate = AppLocale.preference(this)
-        if (isIphoneUsbAttachment(intent)) CarPlayBackgroundSession.usbTakeover = true
+        if (isIphoneUsbAttachment(intent)) {
+            // onCreate runs before loadConnectionSettings(), so the wireless preference is read
+            // straight from persistence rather than from an Activity field that is still default.
+            if (shouldTakeOverUsb()) {
+                CarPlayBackgroundSession.usbTakeover = true
+                appendLog("USB attach: takeover=on (cold start)")
+            } else {
+                appendLog("USB attach: takeover skipped (cold start, wireless protected)")
+            }
+        }
         val usbEvents = IntentFilter(UsbManager.ACTION_USB_DEVICE_DETACHED).apply {
             addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
         }
@@ -1250,6 +1259,13 @@ open class CarPlayHostActivity : ComponentActivity() {
         setIntent(intent)
         if (isIphoneUsbAttachment(intent)) {
             mainHandler.removeCallbacks(usbWirelessFallback)
+            if (!shouldTakeOverUsb()) {
+                appendLog(
+                    "USB attach: takeover skipped (wireless protected, " +
+                        "wirelessPreference=${AirPlayPersistence.loadWirelessEnabled(this)})",
+                )
+                return
+            }
             val switching = useWirelessTransport
             CarPlayBackgroundSession.usbTakeover = true
             appendLog("USB takeover: preserving wireless preference=$wirelessEnabled")
@@ -1271,6 +1287,17 @@ open class CarPlayHostActivity : ComponentActivity() {
         val device = androidx.core.content.IntentCompat.getParcelableExtra(intent, UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
         return device?.vendorId == IphoneUsbMatcher.APPLE_VENDOR_ID
     }
+
+    /**
+     * Reads the policy inputs from persistence on purpose: [onCreate] calls this before the Activity
+     * fields are loaded, and the settings screen saves while this Activity keeps running.
+     */
+    private fun shouldTakeOverUsb(): Boolean = UsbTakeoverPolicy.shouldTakeOver(
+        savedWireless = AirPlayPersistence.loadWirelessEnabled(this),
+        wirelessSetupPresent = DiPlayPreferences.phoneAddress(this) != null,
+        usbAutoTakeover = AirPlayPersistence.loadUsbAutoTakeover(this),
+        defaultModeUsb = DiPlayPreferences.defaultConnectionMode(this) == DefaultConnectionMode.USB,
+    )
 
     override fun onStart() {
         super.onStart()

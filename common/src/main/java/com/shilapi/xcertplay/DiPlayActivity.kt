@@ -1858,6 +1858,12 @@ class DiPlayActivity : ComponentActivity(), AppAppearanceOwner {
             ), connectionModes.indexOf(DiPlayPreferences.defaultConnectionMode(this)), reconnects = false) {
                 DiPlayPreferences.saveDefaultConnectionMode(this, connectionModes[it])
             }
+            toggle(card,
+                getString(R.string.settings_usb_auto_takeover),
+                getString(R.string.settings_usb_auto_takeover_description),
+                AirPlayPersistence.loadUsbAutoTakeover(this)) { enabled ->
+                AirPlayPersistence.saveUsbAutoTakeover(this, enabled)
+            }
             toggle(card, getString(R.string.open_after_the_car_starts),
                 getString(R.string.availability_depends_on_your_head_unit_s_startup_settings),
                 AirPlayPersistence.loadAutoStartOnBoot(this)) {
