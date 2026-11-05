@@ -51,6 +51,8 @@ class ManualHotspotManager(
 
     @Volatile
     private var closed = false
+    @Volatile
+    private var softApClientObserver: Android9SoftApClientObserver? = null
 
     init {
         require(expectedSsid.isNotBlank()) { "ssid must not be blank" }
@@ -151,7 +153,7 @@ class ManualHotspotManager(
             )
         }
         val observedBandLabel = wifiBandLabel(apConfiguration?.band)
-        return WirelessHotspotInfo(
+        val info = WirelessHotspotInfo(
             ssid = expectedSsid,
             passphrase = passphrase,
             security = security,
@@ -169,7 +171,24 @@ class ManualHotspotManager(
             },
             backend = WirelessHotspotBackend.MANUAL_HOTSPOT,
         )
+        // Android 9 exposes a read-only system Soft AP client count via a hidden callback.
+        // Register asynchronously so an OEM Wi-Fi service cannot delay the CarPlay handshake.
+        if (Build.VERSION.SDK_INT == Build.VERSION_CODES.P) {
+            val observer = Android9SoftApClientObserver.forWifiManager(wifiManager, onDiagnostic)
+            synchronized(waitLock) {
+                if (!closed && !isCancelled()) softApClientObserver = observer
+            }
+            if (softApClientObserver === observer) observer.start()
+        }
+        return info
     }
+
+    override fun connectionDiagnosticSnapshot(): String =
+        "association=not_exposed " + when {
+            Build.VERSION.SDK_INT != Build.VERSION_CODES.P -> "softApClients=unsupported"
+            else -> softApClientObserver?.diagnosticSnapshot()
+                ?: "softApClients=not_started softApObservation=not_started"
+        }
 
     override fun validateReady() {
         val expected = confirmed ?: throw WirelessStartupException(
@@ -192,8 +211,12 @@ class ManualHotspotManager(
     }
 
     override fun close() {
-        closed = true
-        synchronized(waitLock) { waitLock.notifyAll() }
+        val observer = synchronized(waitLock) {
+            closed = true
+            waitLock.notifyAll()
+            softApClientObserver.also { softApClientObserver = null }
+        }
+        observer?.close()
         interfaces.close()
     }
 

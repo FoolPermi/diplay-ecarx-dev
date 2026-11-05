@@ -10,6 +10,7 @@ The report includes:
 | `ipv4Usable`, `ipv6LinkLocal`, `ipv6Scoped` | Addresses currently available on the hotspot interface; address literals are omitted. |
 | `wireless endpoint` | Address count, chosen family, actual listener port, channel and security sent in the wireless start request. |
 | `p2pGroup`, `sameGroup`, `reportedP2pClients` | Android's current P2P group and client-list observations. A callback timeout or inaccessible API is recorded explicitly. |
+| `softApClients`, `softApState`, `softApCallbackAgeMs`, `softApObservation` | Android 9 **manual/tethered** hotspot: system-reported total associated stations, AP state, age of the latest count callback and registration status. `unknown` means no count callback was received; `unavailable` includes a redacted failure class. Both differ from a real zero. |
 | `bonjourAdded`, `bonjourResolved`, `bonjourAddressMismatch` | Discovered CarPlay control services, resolved endpoints, and endpoints without an address matching the selected listener family. Zeros indicate no observed service events; they do not prove no multicast packets arrived. |
 | `control probe stage` | Attempt to connect to the iPhone's control endpoint, established TCP, and sent `/connect` request. |
 | `control probe failed after` | Last completed probe stage and exception class for each failed attempt. Exception messages and endpoint identities are omitted. |
@@ -39,6 +40,10 @@ without the existing authenticated-tunnel proof.
 
 Wireless CarPlay's local Wi-Fi transport can coexist with cellular internet. A missing Wi-Fi indicator/checkmark is not proof of failed association, and manually joining the hotspot is not required for normal CarPlay.
 
-The public Android P2P client list may omit legacy Wi-Fi stations. Therefore the report explicitly keeps `association=unknown` and `legacyClients=not_exposed`, even when the list is empty. Manual and local-only hotspots report `association=not_exposed`. Conclusive association or raw multicast diagnosis may still need device-side AP diagnostics or a packet capture supplied separately; this logger does not claim to capture packets.
+The public Android P2P client list may omit legacy Wi-Fi stations. Therefore the report explicitly keeps `association=unknown` and `legacyClients=not_exposed`, even when the list is empty. Manual and local-only hotspots retain `association=not_exposed`. On Android 9, DiPlay additionally *attempts* to register the hidden, read-only `WifiManager.registerSoftApCallback(SoftApCallback, Handler)` when a manual hotspot is attached. The callback reports `wireless SoftAP associatedClients=<count>` on count changes, including zero. Its registration/unregistration runs off the connection thread; no hotspot restart or Wi-Fi setting change is performed. The observer is closed with its own manual hotspot manager so late callbacks cannot contaminate a new connection run.
+
+`softApClients=0` is the framework's snapshot of the **system hotspot** client count, not proof that the selected iPhone was never associated. The result may be delayed or incomplete on OEM firmware; in particular, a car with 2.4/5 GHz companion networks may expose an aggregate count. `softApClients>0` does not identify a specific station. `softApClients=unknown` means no callback yet; `softApClients=unavailable` means registration was blocked or unsupported. No SSID, password, client MAC or IP is exported. This data is diagnostic only: the existing first-TCP timeout (30 s), address-family preference, wireless retry and wired startup paths remain unchanged.
+
+Conclusive per-phone association or raw multicast diagnosis may still need device-side AP diagnostics or a packet capture supplied separately; this logger does not claim to capture packets.
 
 All new report events use counts, fixed categories and exception classes. The existing credential/payload redaction remains enabled.
