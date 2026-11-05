@@ -63,7 +63,7 @@ internal class Android9SoftApClientObserver(
                         }
                     }
                     // Registration may have completed after close(); do not leak the callback.
-                    if (!retained) safelyClose(handle)
+                    if (!retained) safelyClose(handle) else report("observation=registered")
                 } catch (error: Exception) {
                     markUnavailable(error)
                 } catch (error: LinkageError) {
@@ -80,7 +80,7 @@ internal class Android9SoftApClientObserver(
         val previous = sample.getAndUpdate { it.copy(clients = count, clientsAtNs = nowNs()) }
         if (!closed.get() && previous.clients != count) {
             // Record short-lived transitions even if the 10 s startup snapshot misses them.
-            runCatching { log("wireless SoftAP associatedClients=$count") }
+            report("associatedClients=$count")
         }
     }
 
@@ -94,6 +94,11 @@ internal class Android9SoftApClientObserver(
         val cause = (error as? InvocationTargetException)?.targetException ?: error
         failureClass = cause.javaClass.simpleName
         observation = "unavailable"
+        report("observation=unavailable failureClass=${failureClass ?: "Unknown"}")
+    }
+
+    private fun report(message: String) {
+        if (!closed.get()) runCatching { log("wireless SoftAP $message") }
     }
 
     fun diagnosticSnapshot(): String {
