@@ -48,8 +48,9 @@ class Android9SoftApClientObserverTest {
         assertTrue(observer.diagnosticSnapshot().contains("softApClients=2"))
         assertEquals(
             listOf("wireless SoftAP associatedClients=0", "wireless SoftAP associatedClients=2"),
-            transitions,
+            transitions.filter { it.startsWith("wireless SoftAP associatedClients=") },
         )
+        assertTrue(transitions.contains("wireless SoftAP observation=registered"))
         observer.close()
         observer.close()
         assertEquals(1, registrar.unregistrations)
@@ -57,7 +58,7 @@ class Android9SoftApClientObserverTest {
         registrar.state(14)
         assertTrue(observer.diagnosticSnapshot().contains("softApClients=2"))
         assertTrue(observer.diagnosticSnapshot().contains("softApObservation=closed"))
-        assertEquals(2, transitions.size)
+        assertEquals(3, transitions.size)
     }
 
     @Test fun vendorSecurityErrorIsObservabilityOnlyAndNeverLeaksMessages() {
