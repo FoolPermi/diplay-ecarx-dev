@@ -3,6 +3,7 @@ package com.shilapi.xcertplay
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
+import com.shilapi.xcertplay.host.R
 import java.io.ByteArrayOutputStream
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -11,6 +12,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
@@ -41,5 +43,19 @@ class AirPlayIconSizingTest {
         assertSame(small, AirPlayIconSizing.fit(small)!!.second)
         assertNull(AirPlayIconSizing.fit(png(200, 100)))
         assertNull(AirPlayIconSizing.fit(byteArrayOf(1, 2, 3)))
+    }
+
+    /**
+     * The packaged icon is decoded, scaled and PNG-encoded on the launch path whenever it is larger
+     * than [AirPlayIconSizing.MAX_PIXELS]. Shipping it at that size keeps that work off startup.
+     */
+    @Test fun thePackagedIconIsAlreadyTheSizeThePhoneGets() {
+        val packaged = RuntimeEnvironment.getApplication().resources
+            .openRawResource(R.raw.ic_car_home).use { it.readBytes() }
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(packaged, 0, packaged.size, bounds)
+        assertEquals(AirPlayIconSizing.MAX_PIXELS, bounds.outWidth)
+        assertEquals(bounds.outWidth, bounds.outHeight)
+        assertSame(packaged, AirPlayIconSizing.fit(packaged)!!.second)
     }
 }
